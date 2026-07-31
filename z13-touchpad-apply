@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""CLI helper for the Z13 haptic touchpad.
+
+Usage:
+    z13-touchpad-apply                  apply the saved config from the config file
+    z13-touchpad-apply --get            print the current haptic intensity
+    z13-touchpad-apply --set N          set haptic intensity to N (0-100) and save it
+    z13-touchpad-apply --show           show all firmware registers (click force, ...)
+    z13-touchpad-apply --set-click-force G      set click force in grams and save it
+    z13-touchpad-apply --set-click-release G    set release threshold in grams
+    z13-touchpad-apply --set-haptic N           set haptic intensity (0-100)
+
+Used by the GUI, and by the z13-touchpad-haptic systemd user service at login
+(the device resets all registers to defaults after every reboot/suspend).
+"""
+
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from haptic import (  # noqa: E402
+    RegisterError, TouchpadError,
+    REGISTERS_BY_KEY, find_device, get_intensity, read_register,
+    set_intensity, write_register,
+)
+
+CONFIG_FILE = os.path.expanduser("~/.config/z13-g2-tools/config.json")
+
+# Keys the tool persists and re-applies at login (intensity uses the
+# feature-report path; the rest go through the vendor register pipe).
+PERSISTED = ("haptic_intensity", "click_force", "click_release")
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(**values):
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    cfg = load_config()
+    cfg.update(values)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def show_registers(dev):
+    from haptic import REGISTERS
+    for reg in REGISTERS:
+        try:
+            raw = read_register(dev, reg.addr)
+            marker = "" if raw == reg.default else "  (modified)"
+            print(f"  0x{reg.addr:04X}  {reg.name:<12} {reg.fmt(raw):>7}{marker}")
+        except RegisterError as e:
+            print(f"  0x{reg.addr:04X}  {reg.name:<12} ERROR: {e}")
+
+
+def main():
+    dev = find_device()
+    if dev is None:
+        print("未找到 Sensel 触控板", file=sys.stderr)
+        return 1
+
+    args = sys.argv[1:]
+
+    if "--show" in args:
+        show_registers(dev)
+        return 0
+
+    if "--get" in args:
+        try:
+            print(get_intensity(dev))
+        except TouchpadError as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
+
+    if len(args) == 2 and args[0] == "--set":
+        try:
+            value = int(args[1])
+            set_intensity(dev, value)
+            save_config(haptic_intensity=value)
+            print(f"已设置触感强度 {value}")
+        except (TouchpadError, ValueError) as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
+
+    if len(args) == 2 and args[0] in ("--set-click-force", "--set-click-release",
+                                      "--set-haptic"):
+        key = {"--set-click-force": "click_force",
+               "--set-click-release": "click_release",
+               "--set-haptic": "haptic_intensity"}[args[0]]
+        reg = REGISTERS_BY_KEY[key]
+        try:
+            human = float(args[1].rstrip("g").rstrip("%"))
+        except ValueError:
+            print("参数无效", file=sys.stderr)
+            return 1
+        raw = reg.from_human(human)
+        try:
+            write_register(dev, reg.addr, raw)
+        except RegisterError as e:
+            print(e, file=sys.stderr)
+            return 1
+        save_config(**{key: reg.to_human(raw)})
+        print(f"已设置 {reg.name} = {reg.fmt(raw)}")
+        return 0
+
+    # default: apply the saved config
+    cfg = load_config()
+    applied = 0
+    for key in PERSISTED:
+        if key not in cfg:
+            continue
+        value = cfg[key]
+        try:
+            if key == "haptic_intensity":
+                set_intensity(dev, int(value))
+            else:
+                reg = REGISTERS_BY_KEY[key]
+                write_register(dev, reg.addr, reg.from_human(value))
+            applied += 1
+        except (TouchpadError, RegisterError, ValueError) as e:
+            print(f"{key}: {e}", file=sys.stderr)
+    if applied:
+        print(f"已应用 {applied} 项设置")
+        return 0
+    print("没有保存的配置，跳过", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

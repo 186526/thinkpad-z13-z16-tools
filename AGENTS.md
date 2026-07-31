@@ -1,0 +1,98 @@
+# AGENTS.md
+
+ThinkPad Z13/Z16 Gen 2 Sensel haptic touchpad 工具的项目操作手册。
+本文件给 AI agent 提供在此仓库工作的约定、硬件访问模型与安全规则。
+
+## 项目概览
+
+小型的 GUI + CLI 工具,控制 ThinkPad Z13/Z16 Gen 2 的 Sensel 触觉触控板:
+
+- 触感强度(feature 报告 11)、点击力度/释放阈值(固件寄存器)、区域力度
+- 登录时与休眠唤醒后自动重新应用(所有设置都是内存态,重启/挂起即丢)
+- HID feature 报告查看器
+- 参考:[Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2)
+
+## 文件布局
+
+| 文件 | 用途 |
+|---|---|
+| `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
+| `gui.py` | GTK4/libadwaita GUI(设置 + HID 功能/寄存器查看器) |
+| `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` |
+| `z13-touchpad-tool` | GUI 启动脚本(bash) |
+| `feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
+| `resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑 `z13-touchpad-apply` |
+| `README.md` / `README.zh.md` | 文档,中英两份需保持同步 |
+
+## 硬件访问模型
+
+- 触控板是 I2C-HID Sensel 设备,`SNSL0028:00 2C2F:0028`(或 0027),本机在
+  `/dev/hidraw0`(hid-multitouch 驱动);hidraw1 是 Wacom 触屏,不要碰。
+- 检测:`haptic.find_device()` 匹配 uevent 里的 `SNSL002` 或 `00002C2F:0000002`。
+- 权限:`/dev/hidrawN` 为 `root:plugdev 660`,需在 `plugdev` 组或获得
+  udev uaccess 授权。工具用 `HIDIOCGFEATURE` / `HIDIOCSFEATURE` ioctl 读写。
+- 两条通道:
+  1. **feature 报告**(报告 11 触感强度 0-100 等)—— ioctl 直接读写。
+  2. **厂商寄存器管道**(报告 0x09,用法页 0xFF00:0x01)—— 3 字节命令
+     `[cmd_hi, cmd_lo, size]` + 数据 + 校验和,21 字节帧,ACK `1`=读成功
+     `5`=写成功。力度寄存器原始值 = **克数 ÷ 2**。
+- 实测事实(本机验证):feature 11 与寄存器 `0x00AB` 由固件**双向同步**。
+
+### 寄存器表(haptic.py `REGISTERS`)
+
+| 地址 | key | 含义 | 默认 |
+|---|---|---|---|
+| `0x0038` | click_force | 点击力度 | 164g |
+| `0x0090` | click_release | 释放阈值 | 108g |
+| `0x0091`-`0x0092` | zone_left / zone_left_release | 左区 | 76g / 50g |
+| `0x0093`-`0x0094` | zone_right / zone_right_release | 右区 | 76g / 50g |
+| `0x0095`-`0x0096` | zone_middle / zone_middle_release | 中区 | 76g / 50g |
+| `0x00AB` | haptic_intensity | 触感强度 | 50% |
+| `0x006E` | haptics_enabled | 触感总开关 | 1 |
+
+feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
+8(Contact Max / Button Type), 10, 11(触感强度), 12。
+
+## 配置与 systemd 服务
+
+- 配置:`~/.config/z13-g2-tools/config.json`(键与 `REGISTERS_BY_KEY` 对齐)
+- 用户服务(由 `gui.set_autostart()` 安装/移除,模板在 `gui.py`):
+  - `z13-touchpad-haptic.service` —— oneshot,登录时应用配置
+  - `z13-touchpad-resume.service` —— 常驻 `resume-watch.py`,唤醒后应用
+- CLI 默认无参数 = 应用已保存配置;`PERSISTED` 元组决定应用哪些键。
+
+## 约定
+
+- `haptic.py` 与 CLI **仅用 Python 3 标准库**;GUI 用 PyGObject
+  (GTK4 + libadwaita)。
+- UI 文案为**中文**(项目语言);代码注释中英皆可,新代码保持现状风格。
+- CLI 输出人类可读的中文消息;错误走 stderr。
+- 新配置键必须同时加入 `apply.py` 的 `PERSISTED`(如需登录时恢复)。
+- 设备写入全是内存态、可逆,但**写设备状态前仍须向用户确认**,除非任务
+  已明确授权;实验类写入必须"改前快照、测后恢复"。
+- 不要运行 `git commit` / `push` / 其它 git 变更,除非用户明确要求。
+- 不要把运行时状态(配置、快照)写进仓库。
+
+## 无头验证(agent 主要手段)
+
+```bash
+python3 -m py_compile haptic.py gui.py resume-watch.py feature-probe.py
+./z13-touchpad-apply --get          # 触感强度
+./z13-touchpad-apply --show         # 全部寄存器
+./feature-probe.py --dump           # 全部 feature 报告
+python3 -c "import haptic; print(haptic.find_device())"
+systemctl --user status z13-touchpad-haptic.service z13-touchpad-resume.service
+```
+
+- GUI / GNOME 扩展无法无头验证:用单元级调用代替(如 `import gui` 后
+  monkeypatch `gui.CONFIG_FILE` 到临时路径测 `save_config`),涉及界面交互
+  的部分交付后留给用户实测。
+- 设备状态改动后必须回读确认,实验后恢复原值。
+
+## 安全红线
+
+- **不要**绕过 `feature-probe.py` 直接写 report 7(256B blob)或未知寄存器;
+  该工具写前自动存快照,可用 `--restore` 还原(重启也能重置)。
+- 实验"触控板禁用"类开关(报告 6)前先和用户确认——可能把触控板锁死
+  直到重启,务必预留恢复手段。
+- 本机是用户唯一的实测目标机,禁止任何可能损坏设备的写入。
