@@ -7,9 +7,12 @@ ThinkPad Z13/Z16 Gen 2 Sensel haptic touchpad 工具的项目操作手册。
 
 小型的 GUI + CLI 工具,控制 ThinkPad Z13/Z16 Gen 2 的 Sensel 触觉触控板:
 
-- 触感强度(feature 报告 11)、点击力度/释放阈值(固件寄存器)、区域力度
+- 触感强度(feature 报告 11)、点击力度/释放阈值(固件寄存器)、区域力度、
+  力度预设(light/standard/heavy)
 - 登录时与休眠唤醒后自动重新应用(所有设置都是内存态,重启/挂起即丢)
 - HID feature 报告查看器
+- 配套工具:OLED 亮度、IR/RGB 相机检测、GPU reset 监控、硬件探测、
+  GNOME 快速设置扩展
 - 参考:[Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2)
 
 ## 文件布局
@@ -17,11 +20,19 @@ ThinkPad Z13/Z16 Gen 2 Sensel haptic touchpad 工具的项目操作手册。
 | 文件 | 用途 |
 |---|---|
 | `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
-| `gui.py` | GTK4/libadwaita GUI(设置 + HID 功能/寄存器查看器) |
-| `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` |
+| `gui.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 设备页 + HID 查看器) |
+| `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
 | `z13-touchpad-tool` | GUI 启动脚本(bash) |
 | `feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
-| `resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑 `z13-touchpad-apply` |
+| `resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑 `z13-touchpad-apply` 并恢复亮度 |
+| `brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
+| `z13-brightness-apply` | 亮度 CLI(`--get` / `--set` / `--to-windows` / `--to-linux`) |
+| `z13-camera-tool` | IR/RGB 相机检测 + 应用级切换引导 |
+| `gpu-reset-watch.py` | 内核日志监听,记录 amdgpu reset |
+| `hw-probe.py` | 指纹 / TPM / 摄像头探测,写 `docs/hardware-findings.md` |
+| `blob-sweep.py` | 实验性 report-7 逐字节扫描器,带快照/还原(危险,未运行) |
+| `extensions/` | GNOME 快速设置触感开关扩展(`z13-touchpad-quick@user`) |
+| `docs/` | 权限说明(`brightness-permissions.md`)+ 硬件探测结果 |
 | `README.md` / `README.zh.md` | 文档,中英两份需保持同步 |
 
 ## 硬件访问模型
@@ -67,7 +78,7 @@ feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
   (GTK4 + libadwaita)。
 - UI 文案为**中文**(项目语言);代码注释中英皆可,新代码保持现状风格。
 - CLI 输出人类可读的中文消息;错误走 stderr。
-- 新配置键必须同时加入 `apply.py` 的 `PERSISTED`(如需登录时恢复)。
+- 新配置键必须同时加入 `z13-touchpad-apply` 的 `PERSISTED`(如需登录时恢复)。
 - 设备写入全是内存态、可逆,但**写设备状态前仍须向用户确认**,除非任务
   已明确授权;实验类写入必须"改前快照、测后恢复"。
 - 不要运行 `git commit` / `push` / 其它 git 变更,除非用户明确要求。
@@ -76,10 +87,14 @@ feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
 ## 无头验证(agent 主要手段)
 
 ```bash
-python3 -m py_compile haptic.py gui.py resume-watch.py feature-probe.py
+python3 -m py_compile haptic.py gui.py resume-watch.py feature-probe.py \
+    brightness.py gpu-reset-watch.py hw-probe.py blob-sweep.py
 ./z13-touchpad-apply --get          # 触感强度
 ./z13-touchpad-apply --show         # 全部寄存器
+./z13-touchpad-apply --list-devices # 全部 hidraw 设备
+./z13-touchpad-apply --watch-test   # 唤醒监听器自检
 ./feature-probe.py --dump           # 全部 feature 报告
+python3 -m brightness               # 亮度换算单元测试
 python3 -c "import haptic; print(haptic.find_device())"
 systemctl --user status z13-touchpad-haptic.service z13-touchpad-resume.service
 ```

@@ -7,10 +7,16 @@ Lenovo ThinkPad Z13 Gen 2 / Z16 Gen 2:
 - **Click force** slider (10-500 g, default 164 g) — the long-undocumented
   "click sensitivity", now controllable
 - **Release threshold**, optionally auto-linked at 65% of the click force
+- **Per-zone click / release forces** for the left, right and middle
+  button zones (default 76 g / 50 g each)
+- **Preset profiles** — light / standard / heavy click feel, one-click apply
 - **Apply at login and after suspend** via two systemd user services
   (all settings are RAM-only on the device and reset after reboot/suspend)
 - **HID feature viewer** — read-only view of every feature report the
   touchpad exposes over `/dev/hidraw*`
+- **Device info page** — hidraw path, HID ID / name, driver and kernel module
+- **Companion tools** — OLED brightness, IR/RGB camera detection, GPU-reset
+  monitor, hardware probe, and a GNOME Quick Settings toggle (see below)
 
 > Reference: [Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2 – Haptic Touchpad](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2#Haptic_Touchpad)
 
@@ -68,6 +74,14 @@ Verified facts (measured on a ThinkPad Z13 Gen 2):
 ./z13-touchpad-apply --set-click-force 100g   # click force in grams
 ./z13-touchpad-apply --set-click-release 65g  # release threshold in grams
 ./z13-touchpad-apply --set-haptic 60%         # haptic intensity via register
+./z13-touchpad-apply --set-zone left 100 65   # left-zone click + release (g)
+./z13-touchpad-apply --profile heavy          # apply a preset (light|standard|heavy)
+
+# CLI — device & registers
+./z13-touchpad-apply --list-devices           # list all /dev/hidraw* with HID_NAME
+./z13-touchpad-apply --reg 0x0038 read        # read one firmware register
+./z13-touchpad-apply --reg 0x00AB 70          # write one register (grams/% for known ones)
+./z13-touchpad-apply --watch-test             # run the resume-watcher self-test once
 
 # apply the saved config (used by the login service)
 ./z13-touchpad-apply
@@ -80,6 +94,8 @@ In the GUI:
 
 - **点击力度** — drag to set the click force (10-500 g); the release
   threshold follows at 65% while the link switch is on.
+- **力度预设** — pick 轻触 / 标准 / 重按 to apply a click+release preset.
+- **左区/右区/中区** — one click and one release slider per button zone.
 - **触感强度** — drag to adjust haptic feedback (0-100, default 50).
 - "恢复默认" resets haptic intensity to 50.
 - Turn on "登录后自动应用" to install & enable `z13-touchpad-haptic.service`
@@ -87,9 +103,31 @@ In the GUI:
   suspend, via a `PrepareForSleep` D-Bus watcher) in
   `~/.config/systemd/user/`.
 - The "HID 功能" page shows every feature report plus a read-only view of
-  all firmware registers.
+  all firmware registers; the "设备" page shows the hidraw path, HID ID /
+  name, driver and kernel module of the detected touchpad.
 
 Configuration is stored in `~/.config/z13-g2-tools/config.json`.
+
+## Companion tools
+
+- **OLED brightness** — `./z13-brightness-apply --get|--set N|--to-windows N|--to-linux N`
+  maps between Linux and Windows brightness scales and writes the kernel
+  value; permission notes in [docs/brightness-permissions.md](docs/brightness-permissions.md).
+  On wake from suspend the resume watcher re-applies the reported brightness.
+- **Camera detection** — `./z13-camera-tool` labels `/dev/video*` as RGB or
+  IR (IR = `04f2:b78c`), so web apps can be steered to the RGB camera; see
+  its `--help` for PipeWire and v4l2 guidance.
+- **GPU-reset monitor** — `./gpu-reset-watch.py` watches the kernel log for
+  amdgpu resets and logs them (with a desktop notification if available).
+- **Hardware probe** — `./hw-probe.py` checks fingerprint reader, TPM and
+  cameras and writes [docs/hardware-findings.md](docs/hardware-findings.md).
+- **Blob sweep** — `./blob-sweep.py` is an *experimental* single-byte
+  explorer for feature report 7 (the 256-byte Win8 PTP blob), with snapshot
+  and auto-restore. **Dangerous: only run from a graphical session while
+  testing the touchpad by hand.**
+- **GNOME extension** — `extensions/z13-touchpad-quick@user` adds a
+  haptic-intensity on/off toggle to the Quick Settings panel; install with
+  `cd extensions && ./install.sh` (see its README).
 
 ## Firmware registers
 
@@ -139,11 +177,19 @@ Z13 Gen 2 matches the documented defaults exactly.
 | File | Purpose |
 |---|---|
 | `haptic.py` | device detection + feature-report ioctls + register pipe (stdlib only) |
-| `gui.py` | GTK4/libadwaita GUI (settings + HID feature/register viewer) |
-| `z13-touchpad-apply` | CLI: apply saved config / `--get` / `--set` / `--show` / `--set-click-*` |
+| `gui.py` | GTK4/libadwaita GUI (settings + presets + zones + device page) |
+| `z13-touchpad-apply` | CLI: apply config / `--get` / `--set` / `--show` / `--set-click-*` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
 | `z13-touchpad-tool` | GUI launcher |
 | `feature-probe.py` | experimental single-byte writer for the feature-report bank |
-| `resume-watch.py` | D-Bus `PrepareForSleep` watcher; re-applies settings after suspend |
+| `resume-watch.py` | D-Bus `PrepareForSleep` watcher; re-applies settings + brightness after suspend |
+| `brightness.py` | OLED backlight detection + read/write + Linux↔Windows scale (stdlib only) |
+| `z13-brightness-apply` | CLI for brightness (get/set/convert) |
+| `z13-camera-tool` | IR/RGB camera detection + app-level switching guidance |
+| `gpu-reset-watch.py` | kernel-log watcher that logs amdgpu resets |
+| `hw-probe.py` | fingerprint / TPM / camera probe → `docs/hardware-findings.md` |
+| `blob-sweep.py` | experimental report-7 byte sweeper with snapshot/restore |
+| `extensions/` | GNOME Quick Settings haptic toggle (see its README) |
+| `docs/` | permission notes + hardware findings |
 
 ## License
 
