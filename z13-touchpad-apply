@@ -9,6 +9,17 @@ Usage:
     z13-touchpad-apply --set-click-force G      set click force in grams and save it
     z13-touchpad-apply --set-click-release G    set release threshold in grams
     z13-touchpad-apply --set-haptic N           set haptic intensity (0-100)
+    z13-touchpad-apply --set-zone <left|right|middle> CLICK [RELEASE]
+        set one zone's click (+release) force in grams and save it
+        (release defaults to 65% of click, rounded like the main-zone link)
+    z13-touchpad-apply --profile <light|standard|heavy>
+        apply a preset (click+release, grams) and save it
+    z13-touchpad-apply --list-devices  list all /dev/hidraw* with HID_NAME
+    z13-touchpad-apply --watch-test    run resume-watch.py --self-test once
+    z13-touchpad-apply --reg 0xXXXX read     read one firmware register
+    z13-touchpad-apply --reg 0xXXXX VALUE    write one firmware register
+        (known registers take grams/percent and convert internally,
+         unknown ones take the raw byte)
 
 Used by the GUI, and by the z13-touchpad-haptic systemd user service at login
 (the device resets all registers to defaults after every reboot/suspend).
@@ -16,20 +27,33 @@ Used by the GUI, and by the z13-touchpad-haptic systemd user service at login
 
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from haptic import (  # noqa: E402
-    RegisterError, TouchpadError,
-    REGISTERS_BY_KEY, find_device, get_intensity, read_register,
-    set_intensity, write_register,
+    PROFILES, RegisterError, TouchpadError,
+    REGISTERS_BY_ADDR, REGISTERS_BY_KEY, find_device, get_intensity,
+    list_hidraw_devices, read_register, set_intensity, write_register,
 )
 
 CONFIG_FILE = os.path.expanduser("~/.config/z13-g2-tools/config.json")
 
 # Keys the tool persists and re-applies at login (intensity uses the
 # feature-report path; the rest go through the vendor register pipe).
-PERSISTED = ("haptic_intensity", "click_force", "click_release")
+PERSISTED = (
+    "haptic_intensity", "click_force", "click_release",
+    "zone_left", "zone_left_release",
+    "zone_right", "zone_right_release",
+    "zone_middle", "zone_middle_release",
+)
+
+# --set-zone: zone name -> (click register key, release register key)
+ZONE_KEYS = {
+    "left": ("zone_left", "zone_left_release"),
+    "right": ("zone_right", "zone_right_release"),
+    "middle": ("zone_middle", "zone_middle_release"),
+}
 
 
 def load_config():
@@ -109,6 +133,122 @@ def main():
             return 1
         save_config(**{key: reg.to_human(raw)})
         print(f"已设置 {reg.name} = {reg.fmt(raw)}")
+        return 0
+
+    if "--list-devices" in args:
+        devices = list_hidraw_devices()
+        if not devices:
+            print("没有发现 /dev/hidraw* 设备", file=sys.stderr)
+            return 1
+        for path, name, is_tp in devices:
+            mark = "  ← Sensel 触控板" if is_tp else ""
+            print(f"{path}  {name or '(无名称)'}{mark}")
+        return 0
+
+    if "--watch-test" in args:
+        watch = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "resume-watch.py")
+        try:
+            r = subprocess.run([sys.executable, watch, "--self-test"], timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"唤醒监听自测失败: {e}", file=sys.stderr)
+            return 1
+        if r.returncode != 0:
+            print("唤醒监听自测失败（resume-watch 退出码非 0）", file=sys.stderr)
+            return 1
+        print("唤醒监听自测完成（已重新应用保存的配置）")
+        return 0
+
+    if len(args) in (3, 4) and args[0] == "--set-zone":
+        zone = args[1]
+        if zone not in ZONE_KEYS:
+            print(f"区域必须是 left / right / middle（收到: {zone}）",
+                  file=sys.stderr)
+            return 1
+        try:
+            click_g = float(args[2].rstrip("g"))
+            if len(args) == 4:
+                release_g = float(args[3].rstrip("g"))
+            else:
+                # 缺省 release = click 的 65%（对克数取整后再按 0.5g 步进换算）
+                release_g = round(click_g * 0.65)
+        except ValueError:
+            print("参数无效", file=sys.stderr)
+            return 1
+        click_key, release_key = ZONE_KEYS[zone]
+        click_reg = REGISTERS_BY_KEY[click_key]
+        release_reg = REGISTERS_BY_KEY[release_key]
+        click_raw = click_reg.from_human(click_g)
+        rel_raw = release_reg.from_human(release_g)
+        try:
+            write_register(dev, click_reg.addr, click_raw)
+            write_register(dev, release_reg.addr, rel_raw)
+        except RegisterError as e:
+            print(e, file=sys.stderr)
+            return 1
+        save_config(**{click_key: click_reg.to_human(click_raw),
+                       release_key: release_reg.to_human(rel_raw)})
+        print(f"已设置 {zone} 区: 点击 {click_reg.fmt(click_raw)} · "
+              f"释放 {release_reg.fmt(rel_raw)}")
+        return 0
+
+    if len(args) == 2 and args[0] == "--profile":
+        name = args[1]
+        if name not in PROFILES:
+            print(f"未知预设 {name}（可选: {'/'.join(PROFILES)}）",
+                  file=sys.stderr)
+            return 1
+        try:
+            raw_vals = {}
+            for key, grams in PROFILES[name].items():
+                reg = REGISTERS_BY_KEY[key]
+                raw_vals[key] = reg.from_human(grams)
+                write_register(dev, reg.addr, raw_vals[key])
+        except RegisterError as e:
+            print(e, file=sys.stderr)
+            return 1
+        save_config(**{key: REGISTERS_BY_KEY[key].to_human(raw)
+                       for key, raw in raw_vals.items()})
+        print(f"已应用预设 {name}: 点击 "
+              f"{REGISTERS_BY_KEY['click_force'].fmt(raw_vals['click_force'])} · "
+              f"释放 {REGISTERS_BY_KEY['click_release'].fmt(raw_vals['click_release'])}")
+        return 0
+
+    if len(args) == 3 and args[0] == "--reg":
+        try:
+            addr = int(args[1], 16)
+        except ValueError:
+            print(f"寄存器地址无效: {args[1]}", file=sys.stderr)
+            return 1
+        reg = REGISTERS_BY_ADDR.get(addr)
+        if args[2] == "read":
+            try:
+                raw = read_register(dev, addr)
+            except RegisterError as e:
+                print(e, file=sys.stderr)
+                return 1
+            if reg:
+                print(f"0x{addr:04X} {reg.name} = {reg.fmt(raw)}（raw {raw}）")
+            else:
+                print(f"0x{addr:04X} = 0x{raw:02X} ({raw})")
+            return 0
+        try:
+            value = int(args[2])
+        except ValueError:
+            print("参数无效", file=sys.stderr)
+            return 1
+        try:
+            if reg:
+                raw = reg.from_human(value)
+                write_register(dev, addr, raw)
+                print(f"已写入 0x{addr:04X} {reg.name} = {reg.fmt(raw)}（raw {raw}）")
+            else:
+                raw = value & 0xFF
+                write_register(dev, addr, raw)
+                print(f"已写入 0x{addr:04X} = 0x{raw:02X} ({raw})")
+        except RegisterError as e:
+            print(e, file=sys.stderr)
+            return 1
         return 0
 
     # default: apply the saved config

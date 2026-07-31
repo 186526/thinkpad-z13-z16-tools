@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """ThinkPad Z13/Z16 Gen 2 haptic touchpad settings GUI (GTK4 / libadwaita).
 
-Two pages:
-  * 设置     - adjust the haptic feedback intensity (0-100) and optionally
-               re-apply it at login via a systemd user service (the device
-               resets to its default intensity on every reboot).
+Three pages:
+  * 设置     - adjust the haptic feedback intensity (0-100), the click /
+               release thresholds of the main zone (with optional 65%
+               release linkage and preset profiles), the per-zone click /
+               release forces (left/right/middle), and optionally re-apply
+               everything at login via a systemd user service (the device
+               resets to defaults on every reboot).
   * HID 功能 - read-only view of every HID feature report the touchpad
                exposes (read via /dev/hidraw* ioctls).
+  * 设备     - read-only device info (path, HID_ID, HID_NAME, HID_PHYS,
+               driver, kernel module) parsed from /sys/class/hidraw sysfs.
 """
 
 import json
@@ -66,6 +71,16 @@ _UNIT_RESUME = (
 )
 
 DEFAULT_INTENSITY = 50
+
+# 区域滑块配置：(区标题, 点击键, 释放键)
+ZONE_GROUPS = (
+    ("左区", "zone_left", "zone_left_release"),
+    ("右区", "zone_right", "zone_right_release"),
+    ("中区", "zone_middle", "zone_middle_release"),
+)
+
+# 预设档位显示名（键与 haptic.PROFILES 一致）
+PROFILE_LABELS = {"light": "轻触", "standard": "标准", "heavy": "重按"}
 
 # Human-readable description of each known feature report.
 # (report_id, data_length, title, note)
@@ -198,6 +213,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self.stack.add_titled(self._build_settings_page(), "settings", "设置")
         self.stack.add_titled(self._build_features_page(), "features", "HID 功能")
+        self.stack.add_titled(self._build_device_page(), "device", "设备")
 
         switcher = Gtk.StackSwitcher()
         switcher.set_stack(self.stack)
@@ -260,10 +276,45 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_switch.set_active(True)
         self.link_switch.connect("notify::active", self._on_link_toggled)
 
+        self.profile_row = Adw.ComboRow(
+            title="预设档位",
+            subtitle="轻触 / 标准 / 重按：选中即写入主区点击与释放阈值")
+        self.profile_model = Gtk.StringList.new(["轻触", "标准", "重按"])
+        self.profile_row.set_model(self.profile_model)
+        self.profile_row.connect("notify::selected", self._on_profile_selected)
+
+        click_group.add(self.profile_row)
         click_group.add(click_box)
         click_group.add(release_box)
         click_group.add(self.link_switch)
         page.add(click_group)
+
+        zone_group = Adw.PreferencesGroup(
+            title="区域力度",
+            description="左/右/中三个区域的点击与释放阈值（0x0091-0x0096，"
+                        "默认 76g / 50g）。区域独立调节，不跟随主区 65% 联动。")
+        self.zone_widgets = {}   # key -> (label, scale)
+        for ztitle, click_key, release_key in ZONE_GROUPS:
+            zone_group.add(Adw.ActionRow(title=ztitle))
+            for key in (click_key, release_key):
+                reg = haptic.REGISTERS_BY_KEY[key]
+                label = Gtk.Label(label="—", width_chars=6, xalign=1.0)
+                scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
+                                                 10, 500, 1)
+                scale.set_hexpand(True)
+                scale.set_draw_value(False)
+                scale.connect("value-changed",
+                              lambda s, k=key: self._on_zone_changed(s, k))
+                box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+                box.set_margin_top(8)
+                box.set_margin_bottom(8)
+                box.set_margin_start(16)
+                box.set_margin_end(16)
+                box.append(label)
+                box.append(scale)
+                zone_group.add(box)
+                self.zone_widgets[key] = (label, scale)
+        page.add(zone_group)
 
         haptic_group = Adw.PreferencesGroup(
             title="触感强度",
@@ -356,6 +407,21 @@ class MainWindow(Adw.ApplicationWindow):
         page.add(tip)
         return page
 
+    # ---------------- device page ----------------
+
+    def _build_device_page(self):
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup(
+            title="设备信息",
+            description="从 /sys/class/hidraw/*/device/uevent 读取（只读）")
+        self._device_rows = {}
+        for title in ("设备路径", "HID_ID", "HID_NAME", "HID_PHYS", "驱动", "内核模块"):
+            row = Adw.ActionRow(title=title, subtitle="—")
+            group.add(row)
+            self._device_rows[title] = row
+        page.add(group)
+        return page
+
     # ---------------- state ----------------
 
     def _load_state(self):
@@ -363,10 +429,19 @@ class MainWindow(Adw.ApplicationWindow):
         if self.device is None:
             self.device_row.set_subtitle("未找到（未检测到 Sensel 触控板）")
             self.device_row.add_css_class("error")
+            for row in self._device_rows.values():
+                row.set_subtitle("未检测到设备")
             self._set_controls_enabled(False)
             return
 
         self.device_row.set_subtitle(self.device)
+        info = haptic.device_info(self.device) or {}
+        self._device_rows["设备路径"].set_subtitle(self.device)
+        self._device_rows["HID_ID"].set_subtitle(info.get("HID_ID", "—") or "—")
+        self._device_rows["HID_NAME"].set_subtitle(info.get("HID_NAME", "—") or "—")
+        self._device_rows["HID_PHYS"].set_subtitle(info.get("HID_PHYS", "—") or "—")
+        self._device_rows["驱动"].set_subtitle(info.get("DRIVER", "—") or "—")
+        self._device_rows["内核模块"].set_subtitle(info.get("MODULE") or "未知")
         try:
             self.current = haptic.get_intensity(self.device)
             self._refresh_features()
@@ -380,10 +455,21 @@ class MainWindow(Adw.ApplicationWindow):
         if click is not None:
             self.click_scale.set_value(click * 2)
             self.click_label.set_text(f"{click * 2}g")
+            # 选中与当前点击力度最接近的预设档（回填，不触发应用）
+            names = list(haptic.PROFILES)
+            best = min(names, key=lambda n: abs(
+                haptic.PROFILES[n]["click_force"] - click * 2))
+            self.profile_row.set_selected(names.index(best))
         release = regs.get("click_release")
         if release is not None:
             self.release_scale.set_value(release * 2)
             self.release_label.set_text(f"{release * 2}g")
+
+        for key, (zone_label, zone_scale) in self.zone_widgets.items():
+            raw = regs.get(key)
+            if raw is not None:
+                zone_scale.set_value(raw * 2)
+                zone_label.set_text(f"{raw * 2}g")
 
         self.scale.set_value(self.current)
         self.value_label.set_text(str(self.current))
@@ -392,8 +478,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _set_controls_enabled(self, enabled):
         for w in (self.scale, self.reset_button, self.autostart_switch,
-                  self.click_scale, self.release_scale, self.link_switch):
+                  self.click_scale, self.release_scale, self.link_switch,
+                  self.profile_row):
             w.set_sensitive(enabled)
+        for _label, scale in self.zone_widgets.values():
+            scale.set_sensitive(enabled)
 
     def _refresh_features(self):
         try:
@@ -479,6 +568,42 @@ class MainWindow(Adw.ApplicationWindow):
         if not self.link_switch.get_active():
             self._schedule_apply()
 
+    def _on_profile_selected(self, row, _pspec):
+        if self._initializing or self.device is None:
+            return
+        idx = row.get_selected()
+        names = list(haptic.PROFILES)
+        if not 0 <= idx < len(names):
+            return
+        name = names[idx]
+        try:
+            raw_vals = {}
+            for key, grams in haptic.PROFILES[name].items():
+                reg = haptic.REGISTERS_BY_KEY[key]
+                raw_vals[key] = reg.from_human(grams)
+                haptic.write_register(self.device, reg.addr, raw_vals[key])
+        except haptic.RegisterError as e:
+            self._show_toast(str(e), is_error=True)
+            return
+        # 同步滑块到设备真实值并保存（与 _apply_all 相同的 raw*2 显示）
+        self._syncing = True
+        self.click_scale.set_value(raw_vals["click_force"] * 2)
+        self.click_label.set_text(f"{raw_vals['click_force'] * 2}g")
+        self.release_scale.set_value(raw_vals["click_release"] * 2)
+        self.release_label.set_text(f"{raw_vals['click_release'] * 2}g")
+        self._syncing = False
+        save_config(**{key: raw_vals[key] * 2 for key in raw_vals})
+        label = PROFILE_LABELS.get(name, name)
+        self._show_toast(f"已应用预设「{label}」: 点击 {raw_vals['click_force'] * 2}g · "
+                         f"释放 {raw_vals['click_release'] * 2}g")
+
+    def _on_zone_changed(self, scale, key):
+        grams = int(round(scale.get_value()))
+        self.zone_widgets[key][0].set_text(f"{grams}g")
+        if self._initializing or self.device is None or self._syncing:
+            return
+        self._schedule_apply()
+
     def _on_link_toggled(self, switch, _pspec):
         if self._initializing:
             return
@@ -511,9 +636,18 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             rel_g = int(round(self.release_scale.get_value()))
             rel_raw = haptic.REGISTERS_BY_KEY["click_release"].from_human(rel_g)
+        # 区域滑块各自换算成 raw（只写自己的寄存器，不碰主区）
+        zone_raws = {}
+        for key, (_label, scale) in self.zone_widgets.items():
+            reg = haptic.REGISTERS_BY_KEY[key]
+            grams = int(round(scale.get_value()))
+            zone_raws[key] = reg.from_human(grams)
         try:
             haptic.write_register(self.device, 0x0038, click_raw)
             haptic.write_register(self.device, 0x0090, rel_raw)
+            for key, raw in zone_raws.items():
+                reg = haptic.REGISTERS_BY_KEY[key]
+                haptic.write_register(self.device, reg.addr, raw)
         except haptic.RegisterError as e:
             self._show_toast(str(e), is_error=True)
             return GLib.SOURCE_REMOVE
@@ -524,8 +658,14 @@ class MainWindow(Adw.ApplicationWindow):
         if self.link_switch.get_active():
             self.release_scale.set_value(rel_raw * 2)
             self.release_label.set_text(f"{rel_raw * 2}g")
+        for key, raw in zone_raws.items():
+            label, scale = self.zone_widgets[key]
+            scale.set_value(raw * 2)
+            label.set_text(f"{raw * 2}g")
         self._syncing = False
-        save_config(click_force=click_raw * 2, click_release=rel_raw * 2)
+        cfg = {"click_force": click_raw * 2, "click_release": rel_raw * 2}
+        cfg.update({key: raw * 2 for key, raw in zone_raws.items()})
+        save_config(**cfg)
         self._show_toast(f"点击力度 {click_raw * 2}g · 释放 {rel_raw * 2}g")
         return GLib.SOURCE_REMOVE
 
