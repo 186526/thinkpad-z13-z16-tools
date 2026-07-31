@@ -1,0 +1,55 @@
+name: Build AppImage
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git describe 需要 tag 历史
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-cairo \
+            libglib2.0-bin adwaita-icon-theme
+
+      - name: Download appimagetool
+        run: |
+          curl -sL -o /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+
+      - name: Build AppImage
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION=dev
+          else
+            VERSION="$GITHUB_REF_NAME"
+          fi
+          VERSION="$VERSION" APPIMAGETOOL=/tmp/appimagetool ./build-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppImage
+          path: dist/*.AppImage
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.AppImage \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Z13/Z16 Gen 2 工具箱 $GITHUB_REF_NAME" \
+            --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" dist/*.AppImage \
+            --clobber --repo "$GITHUB_REPOSITORY"

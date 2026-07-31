@@ -913,7 +913,7 @@ class MainWindow(Adw.ApplicationWindow):
 
 class App(Adw.Application):
     def __init__(self, developer=False):
-        super().__init__(application_id="io.github.z13touchpad.tool",
+        super().__init__(application_id="io.github.thinkpad-z13-z16-tools",
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.win = None
         self.developer = developer

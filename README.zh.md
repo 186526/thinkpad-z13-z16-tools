@@ -37,6 +37,26 @@
 
 ## 快速开始
 
+### AppImage(推荐)
+
+从 [Releases](https://github.com/186526/thinkpad-z13-z16-tools/releases) 下载最新
+`thinkpad-z13-z16-tools-*.AppImage` —— 已内置 Python、PyGObject、GTK4 与
+libadwaita,无需安装任何包(下方 `/dev/hidraw*` 权限要求仍然适用):
+
+```bash
+chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
+./thinkpad-z13-z16-tools-v0.1.0.AppImage
+```
+
+自行构建(需要 `appimagetool`):
+
+```bash
+VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
+```
+
+注意:AppImage 提供的是 GUI;命令行工具(`z13-touchpad-apply` 等)请从源码
+检出使用。CI 在每次推送 `v*` tag 时自动构建 AppImage 并附加到对应 release。
+
 ### 依赖
 
 - Python 3.9+(`haptic.py` / CLI 仅需标准库)

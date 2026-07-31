@@ -47,6 +47,28 @@ are companion tools that complete a daily-driver toolkit.
 
 ## Quick start
 
+### AppImage (recommended)
+
+Grab the latest `thinkpad-z13-z16-tools-*.AppImage` from the
+[Releases](https://github.com/186526/thinkpad-z13-z16-tools/releases) page —
+it bundles Python, PyGObject, GTK4 and libadwaita, so no package install is
+needed (the `/dev/hidraw*` permission requirement below still applies):
+
+```bash
+chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
+./thinkpad-z13-z16-tools-v0.1.0.AppImage
+```
+
+Build it yourself (requires `appimagetool`):
+
+```bash
+VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
+```
+
+Note: the AppImage ships the GUI; the command-line tools
+(`z13-touchpad-apply` etc.) are meant to be used from a source checkout.
+CI builds the AppImage on every `v*` tag push and attaches it to the release.
+
 ### Requirements
 
 - Python 3.9+ (`haptic.py` / the CLIs need only the standard library)
