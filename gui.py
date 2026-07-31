@@ -34,535 +34,36 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import (  # noqa: E402
     Adw, Gdk, Gio, GLib, Gtk, Pango, PangoCairo,
 )
+try:  # noqa: E402
+    import cairo  # pycairo，用于渐变等高级绘制
+except ImportError:  # pragma: no cover
+    cairo = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import haptic  # noqa: E402
 from haptic import TouchpadError  # noqa: E402
 import brightness  # noqa: E402
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-APPLY_SCRIPT = os.path.join(BASE_DIR, "z13-touchpad-apply")
-
-CONFIG_DIR = os.path.expanduser("~/.config/z13-g2-tools")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
-
-UNIT_NAME = "z13-touchpad-haptic.service"
-UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
-UNIT_FILE = os.path.join(UNIT_DIR, UNIT_NAME)
-UNIT_RESUME = "z13-touchpad-resume.service"
-UNIT_RESUME_FILE = os.path.join(UNIT_DIR, UNIT_RESUME)
-RESUME_WATCH_SCRIPT = os.path.join(BASE_DIR, "resume-watch.py")
-
-_UNIT_APPLY = (
-    "[Unit]\n"
-    "Description=Apply ThinkPad Z13/Z16 Gen 2 haptic touchpad settings\n"
-    "After=graphical-session.target\n"
-    "PartOf=graphical-session.target\n"
-    "\n"
-    "[Service]\n"
-    "Type=oneshot\n"
-    "ExecStart={script}\n"
-    "\n"
-    "[Install]\n"
-    "WantedBy=graphical-session.target\n"
-)
-
-_UNIT_RESUME = (
-    "[Unit]\n"
-    "Description=Re-apply ThinkPad Z13 touchpad settings after suspend\n"
-    "After=graphical-session.target\n"
-    "PartOf=graphical-session.target\n"
-    "\n"
-    "[Service]\n"
-    "Type=simple\n"
-    "ExecStart=/usr/bin/env python3 {watch}\n"
-    "\n"
-    "[Install]\n"
-    "WantedBy=graphical-session.target\n"
-)
-
-DEFAULT_INTENSITY = 50
-
-# 触感强度档位：Windows 驱动为 0/25/50/75/100 五档，滑块按 25 吸附
-INTENSITY_STEP = 25
-
-# 触控板图上的按键顺序（视觉左→右）：(键标题, 点击键, 释放键)
-ZONE_MAP = (
-    ("左键", "zone_left", "zone_left_release"),
-    ("中键", "zone_middle", "zone_middle_release"),
-    ("右键", "zone_right", "zone_right_release"),
-)
-
-# 预设档位显示名（键与 haptic.PROFILES 一致）
-PROFILE_LABELS = {"light": "轻触", "standard": "标准", "heavy": "重按"}
-
-# 顶部按键预设力度（克数）：release 取 click 的 65% 附近，标准档即出厂默认
-ZONE_PRESETS = {
-    "light": {"click": 55, "release": 36},
-    "standard": {"click": 76, "release": 50},
-    "heavy": {"click": 110, "release": 72},
-}
-ZONE_PRESET_LABELS = {"light": "轻触", "standard": "标准", "heavy": "重按"}
-
-# ---------------- 配套工具（GNOME 扩展 / 亮度 / 相机 / GPU reset / 硬件探测） ----------------
-
-EXT_UUID = "z13-touchpad-quick@user"
-EXT_DIR = os.path.expanduser(f"~/.local/share/gnome-shell/extensions/{EXT_UUID}")
-EXT_INSTALL_SCRIPT = os.path.join(BASE_DIR, "extensions", "install.sh")
-CAMERA_SCRIPT = os.path.join(BASE_DIR, "z13-camera-tool")
-PROBE_SCRIPT = os.path.join(BASE_DIR, "hw-probe.py")
-GPU_RESET_LOG = os.path.join(CONFIG_DIR, "gpu-resets.log")
-
-
-def ext_installed():
-    """GNOME 快速设置扩展是否已安装（目录存在即视为安装过）。"""
-    return os.path.isdir(EXT_DIR)
-
-
-def ext_enabled():
-    """扩展是否在 GNOME 的启用列表里。"""
-    try:
-        out = subprocess.run(
-            ["gsettings", "get", "org.gnome.shell", "enabled-extensions"],
-            capture_output=True, text=True, timeout=3).stdout.strip()
-        if out.startswith("["):
-            return EXT_UUID in ast.literal_eval(out)
-    except Exception:
-        pass
-    return False
-
-
-def install_extension():
-    """运行 extensions/install.sh（幂等，可重装）。返回 (ok, 消息)。"""
-    if not os.path.exists(EXT_INSTALL_SCRIPT):
-        return False, "找不到 extensions/install.sh"
-    try:
-        res = subprocess.run(["bash", EXT_INSTALL_SCRIPT],
-                             capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return False, f"安装失败: {e}"
-    tail = (res.stdout or res.stderr or "").strip().splitlines()
-    msg = tail[-1] if tail else ("已安装" if res.returncode == 0 else "安装失败")
-    return res.returncode == 0, msg
-
-
-def uninstall_extension():
-    """卸载扩展：从 GNOME 启用列表移除并删除扩展目录。返回 (ok, 消息)。"""
-    removed = False
-    try:
-        out = subprocess.run(
-            ["gsettings", "get", "org.gnome.shell", "enabled-extensions"],
-            capture_output=True, text=True, timeout=3).stdout.strip()
-        if out.startswith("["):
-            enabled = ast.literal_eval(out)
-            if EXT_UUID in enabled:
-                enabled.remove(EXT_UUID)
-                subprocess.run(
-                    ["gsettings", "set", "org.gnome.shell", "enabled-extensions",
-                     str(enabled)], check=True, timeout=3)
-                removed = True
-    except Exception:
-        pass
-    if os.path.isdir(EXT_DIR):
-        shutil.rmtree(EXT_DIR, ignore_errors=True)
-    return True, "已卸载扩展" + ("并移除启用项" if removed else "")
-
-
-def probe_cameras():
-    """运行 z13-camera-tool --json，返回相机清单文本；失败返回 None。"""
-    try:
-        res = subprocess.run([sys.executable, CAMERA_SCRIPT, "--json"],
-                             capture_output=True, text=True, timeout=10)
-        data = json.loads(res.stdout or "[]")
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        return None
-    if not data:
-        return "未检测到相机"
-    return " · ".join(f"{c.get('name', '?')} ({'IR' if c.get('ir') else 'RGB'})"
-                      for c in data)
-
-
-def gpu_reset_summary():
-    """最近一次 GPU 重置记录摘要；无记录/不可读返回提示文本。"""
-    if not os.path.exists(GPU_RESET_LOG):
-        return "无重置记录"
-    try:
-        with open(GPU_RESET_LOG, encoding="utf-8") as f:
-            lines = [ln.strip() for ln in f if ln.strip()]
-    except OSError:
-        return "无法读取日志"
-    return f"最近: {lines[-1]}" if lines else "日志为空"
-
-
-def run_hw_probe():
-    """运行 hw-probe.py（指纹/TPM/相机探测）。返回 (ok, 消息)。"""
-    try:
-        res = subprocess.run([sys.executable, PROBE_SCRIPT],
-                             capture_output=True, text=True, timeout=30)
-        lines = [ln.strip() for ln in (res.stdout or "").splitlines()
-                 if "已写入" in ln]
-        msg = lines[-1] if lines else "探测完成"
-        return res.returncode == 0, msg
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return False, f"探测失败: {e}"
-
-# Human-readable description of each known feature report.
-# (report_id, data_length, title, note)
-FEATURE_ROWS = (
-    (3, 1, "报告 3 · 厂商参数", "Vendor 0xFF00:0x01"),
-    (4, 1, "报告 4 · Inputmode", "输入模式 (0-10)"),
-    (6, 1, "报告 6 · Surface / Button Switch", "表面开关 / 按钮开关，各 1 bit"),
-    (7, 256, "报告 7 · 厂商参数区", "Vendor 0xFF00:0xC5 · 256 字节参数区"),
-    (8, 1, "报告 8 · Contact Max / Button Type", "最大触点 / 按钮类型，各 4 bit"),
-    (10, 1, "报告 10 · 厂商参数", "Digitizer Vendor 0x60，1 bit"),
-    (11, 1, "报告 11 · Haptic Intensity", "触感强度 (0-100)"),
-    (12, 1, "报告 12 · 厂商参数", "Vendor 0xFF00:0x01"),
-)
-
-
-def fmt_feature_value(rid, data):
-    """Human-readable rendering of a single report's data bytes."""
-    if not data:
-        return "读取失败"
-    b = data[0]
-    if rid == 6:
-        return f"Surface={b & 1}  Button={(b >> 1) & 1}  0x{b:02x}"
-    if rid == 8:
-        return f"Contact Max={b & 0x0F}  Button Type={(b >> 4) & 0x0F}  0x{b:02x}"
-    if rid == 7:
-        nz = haptic.bank_nonzero(data)
-        return "全部为 0" if not nz else ", ".join(f"{i:x}={v}" for i, v in nz[:8])
-    return f"0x{b:02x} ({b})"
-
-
-def fmt_bank_hex(data):
-    """16-column hex dump of the 256-byte report-7 bank."""
-    lines = []
-    for off in range(0, 256, 16):
-        chunk = data[off:off + 16]
-        lines.append(f"{off:03x}: " + " ".join(f"{b:02x}" for b in chunk))
-    return "\n".join(lines)
+# 非 GTK 支撑逻辑（常量 / 配置 / 自启动 / 配套工具）与自绘触控板组件
+# 拆分为独立模块；这里 re-export 全部公共名字，保持 tests/test_gui_e2e.py
+# 对 gui 模块级名字的 monkeypatch 兼容。
+import gui_utils  # noqa: E402
+from gui_utils import *  # noqa: E402,F403
+from touchpad_map import TouchpadMap  # noqa: E402
 
 
 def load_config():
-    try:
-        with open(CONFIG_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    """读配置文件；把 gui 命名空间的 CONFIG_FILE 传给实现。
+
+    测试 monkeypatch gui.CONFIG_FILE 到临时路径后，这里必须读到新值，
+    因此不能直接用 gui_utils.load_config（它读 gui_utils.CONFIG_FILE）。
+    """
+    return gui_utils.load_config(CONFIG_FILE)
 
 
 def save_config(**values):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    cfg = load_config()
-    cfg.update(values)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-
-
-def systemctl(args):
-    return subprocess.run(["systemctl", "--user", *args],
-                          capture_output=True, text=True)
-
-
-def autostart_enabled():
-    """True when the login-time service is enabled and points at this repo."""
-    r = systemctl(["is-enabled", UNIT_NAME])
-    if r.returncode != 0 or "enabled" not in r.stdout:
-        return False
-    try:
-        with open(UNIT_FILE, encoding="utf-8") as f:
-            return APPLY_SCRIPT in f.read()
-    except OSError:
-        return False
-
-
-def set_autostart(enabled):
-    """Enable/disable the login-time apply + resume-watch services.
-
-    Returns an error string, or None on success.
-    """
-    if enabled:
-        try:
-            os.makedirs(UNIT_DIR, exist_ok=True)
-            with open(UNIT_FILE, "w", encoding="utf-8") as f:
-                f.write(_UNIT_APPLY.format(script=APPLY_SCRIPT))
-            with open(UNIT_RESUME_FILE, "w", encoding="utf-8") as f:
-                f.write(_UNIT_RESUME.format(watch=RESUME_WATCH_SCRIPT))
-        except OSError as e:
-            return f"写入单元文件失败: {e}"
-        r = systemctl(["daemon-reload"])
-        if r.returncode != 0:
-            return f"daemon-reload 失败: {r.stderr.strip()}"
-        r = systemctl(["enable", UNIT_NAME, UNIT_RESUME])
-        if r.returncode != 0:
-            return f"启用服务失败: {r.stderr.strip()}"
-        r = systemctl(["start", UNIT_RESUME])
-        if r.returncode != 0:
-            return f"启动唤醒监听失败: {r.stderr.strip()}"
-    else:
-        systemctl(["stop", UNIT_RESUME])
-        systemctl(["disable", UNIT_NAME, UNIT_RESUME])
-        for p in (UNIT_FILE, UNIT_RESUME_FILE):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-        r = systemctl(["daemon-reload"])
-        if r.returncode != 0:
-            return f"daemon-reload 失败: {r.stderr.strip()}"
-    return None
-
-
-class TouchpadMap(Gtk.DrawingArea):
-    """可视化触控板：上沿 TrackPoint 三键条带（左/中/右）+ 主点击区。
-
-    本机实测确认：0x0091-0x0096 三个 zone 对应触控板上沿一条横向条带里的
-    三个虚拟 TrackPoint 按键（左键/中键/右键），而非表面纵向分区。条带高约
-    20%，三键按 40:20:40 宽度分配（中键较窄）；条带以下为整板可点击的主
-    点击区（力度 0x0038，仅展示）。分区边界为示意，纯绘制
-    组件不持有设备状态：数值与选中态由外部通过 set_values / set_selected /
-    set_main_force 驱动；点击条带内按键时回调 on_select(index)，由
-    MainWindow 统一同步（_selected 不在图内直接修改）。
-    """
-
-    _STRIP_FRAC = 0.20                 # 顶部条带占板高比例
-    _SPLITS = (0.0, 0.40, 0.60, 1.0)   # 三键宽度 40:20:40
-    _LABELS = ("左键", "中键", "右键")
-    _ACCENT_FALLBACK = (0.208, 0.518, 0.894)  # #3584e4
-
-    def __init__(self, on_select):
-        super().__init__()
-        self._on_select = on_select
-        self._forces = [0, 0, 0]
-        self._releases = [0, 0, 0]
-        self._main_force_g = 0
-        self._selected = 0
-        self._hovered = -1
-        self.set_content_width(280)
-        self.set_content_height(180)
-        self.set_draw_func(self._draw)
-
-        click = Gtk.GestureClick()
-        click.connect("pressed", self._on_pressed)
-        self.add_controller(click)
-
-        motion = Gtk.EventControllerMotion()
-        motion.connect("motion", self._on_motion)
-        motion.connect("leave", self._on_leave)
-        self.add_controller(motion)
-
-    # ---------------- 外部接口 ----------------
-
-    def set_values(self, forces, releases):
-        """设置三键（左,中,右）的点击/释放克数并重绘。"""
-        self._forces = list(forces)
-        self._releases = list(releases)
-        self.queue_draw()
-
-    def set_main_force(self, grams):
-        """主点击区（整板点击力度 0x0038）的克数，仅展示。"""
-        self._main_force_g = grams
-        self.queue_draw()
-
-    def set_selected(self, index):
-        self._selected = index
-        self.queue_draw()
-
-    # ---------------- 事件 ----------------
-
-    def _zone_at(self, x, y):
-        """返回 (x,y) 命中的键下标，主点击区内返回 -1。"""
-        w, h = self.get_width(), self.get_height()
-        if w <= 0 or h <= 0:
-            return -1
-        if y > h * self._STRIP_FRAC:
-            return -1  # 主点击区不参与分区选择
-        if x < self._SPLITS[1] * w:
-            return 0
-        if x < self._SPLITS[2] * w:
-            return 1
-        return 2
-
-    def _on_pressed(self, _gesture, _n, x, y):
-        zone = self._zone_at(x, y)
-        if zone < 0:
-            return
-        # 不在此直接改选中态：选中态以 MainWindow.selected_zone 为唯一
-        # 数据源，统一由回调触发 _set_selected_zone() 同步组合框/滑块/高亮，
-        # 避免回调提前返回时图上高亮与其余控件脱节。
-        if self._on_select is not None:
-            self._on_select(zone)
-
-    def _on_motion(self, _ctrl, x, y):
-        zone = self._zone_at(x, y)
-        if zone != self._hovered:
-            self._hovered = zone
-            self.queue_draw()
-        self.set_cursor_from_name("pointer" if zone >= 0 else "default")
-
-    def _on_leave(self, _ctrl):
-        if self._hovered != -1:
-            self._hovered = -1
-            self.queue_draw()
-        self.set_cursor(None)
-
-    # ---------------- 绘制 ----------------
-
-    def _accent(self):
-        try:
-            rgba = Adw.StyleManager.get_default().get_accent_color()
-            return (rgba.red, rgba.green, rgba.blue)
-        except Exception:
-            return self._ACCENT_FALLBACK
-
-    @staticmethod
-    def _rounded_rect(cr, x, y, w, h, r):
-        cr.new_sub_path()
-        cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
-        cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
-        cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
-        cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
-        cr.close_path()
-
-    @staticmethod
-    def _rounded_rect4(cr, x, y, w, h, r_tl, r_tr, r_bl, r_br):
-        """四角半径可分别指定的圆角矩形路径（用于贴边角跟随底板圆角）。"""
-        cr.new_sub_path()
-        cr.arc(x + w - r_tr, y + r_tr, r_tr, -math.pi / 2, 0)
-        cr.arc(x + w - r_br, y + h - r_br, r_br, 0, math.pi / 2)
-        cr.arc(x + r_bl, y + h - r_bl, r_bl, math.pi / 2, math.pi)
-        cr.arc(x + r_tl, y + r_tl, r_tl, math.pi, 3 * math.pi / 2)
-        cr.close_path()
-
-    def _draw(self, _area, cr, width, height):
-        w, h = float(width), float(height)
-        radius = min(16.0, h / 2)
-        accent = self._accent()
-        strip_h = h * self._STRIP_FRAC
-
-        # 底板：微亮于背景的填充 + 细描边
-        self._rounded_rect(cr, 0, 0, w, h, radius)
-        cr.set_source_rgba(1, 1, 1, 0.03)
-        cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, 0.12)
-        cr.set_line_width(1.0)
-        cr.stroke()
-
-        # 顶部条带内三键填充（选中 accent 淡色，悬停白色 8%，裁切在圆角内）
-        for i in range(3):
-            x0 = self._SPLITS[i] * w
-            x1 = self._SPLITS[i + 1] * w
-            key_radius = min(8.0, strip_h / 2, (x1 - x0) / 2)
-            cr.save()
-            self._rounded_rect(cr, 0, 0, w, h, radius)
-            cr.clip()
-            self._rounded_rect(cr, x0, 0, x1 - x0, strip_h, key_radius)
-            if i == self._selected:
-                cr.set_source_rgba(accent[0], accent[1], accent[2], 0.15)
-                cr.fill()
-            elif i == self._hovered:
-                cr.set_source_rgba(1, 1, 1, 0.08)
-                cr.fill()
-            cr.restore()
-
-        # 条带与主区分隔线 + 键间分隔虚线
-        cr.set_dash([4.0, 3.0], 0)
-        cr.set_source_rgba(1, 1, 1, 0.15)
-        cr.set_line_width(1.0)
-        cr.move_to(2, strip_h)
-        cr.line_to(w - 2, strip_h)
-        cr.stroke()
-        for i in (1, 2):
-            lx = self._SPLITS[i] * w
-            cr.move_to(lx, 2)
-            cr.line_to(lx, strip_h - 2)
-            cr.stroke()
-        cr.set_dash([], 0)
-
-        # 选中键描边（圆角；贴边角跟随底板圆角，避免被底板圆角裁切成直角）
-        if self._selected >= 0:
-            x0 = self._SPLITS[self._selected] * w
-            x1 = self._SPLITS[self._selected + 1] * w
-            kw = x1 - x0 - 2
-            kh = strip_h - 2
-            key_radius = min(8.0, kh / 2, kw / 2)
-            r_tl = r_tr = key_radius
-            if self._selected == 0:
-                r_tl = radius
-            elif self._selected == 2:
-                r_tr = radius
-            self._rounded_rect4(cr, x0 + 1, 1, kw, kh, r_tl, r_tr, key_radius, key_radius)
-            cr.set_source_rgba(accent[0], accent[1], accent[2], 0.6)
-            cr.set_line_width(2.0)
-            cr.stroke()
-
-        # 三键文字：标签 + 克数
-        for i in range(3):
-            self._draw_key_text(cr, i, w, strip_h, accent)
-
-        # 主点击区文字
-        self._draw_main_text(cr, w, h, strip_h)
-
-    def _draw_key_text(self, cr, i, w, strip_h, accent):
-        x0 = self._SPLITS[i] * w
-        zw = (self._SPLITS[i + 1] - self._SPLITS[i]) * w
-        cy = strip_h / 2
-
-        fg = self.get_style_context().get_color()
-        if i == self._selected:
-            rgb, alpha = accent, 1.0
-        elif i == self._hovered:
-            rgb, alpha = (fg.red, fg.green, fg.blue), 0.75
-        else:
-            rgb, alpha = (fg.red, fg.green, fg.blue), 0.55
-
-        layout = self._create_layout(self._LABELS[i], 11)
-        layout.set_alignment(Pango.Alignment.CENTER)
-        layout.set_width(max(1, int(zw * Pango.SCALE)))
-        layout.set_ellipsize(Pango.EllipsizeMode.END)
-        _lw, lh = layout.get_pixel_size()
-        cr.set_source_rgba(rgb[0], rgb[1], rgb[2], alpha)
-        cr.move_to(x0, cy - lh - 2)
-        PangoCairo.show_layout(cr, layout)
-
-        value_layout = self._create_layout(
-            f"{self._forces[i]}g / {self._releases[i]}g", 11,
-            Pango.Weight.SEMIBOLD)
-        value_layout.set_alignment(Pango.Alignment.CENTER)
-        value_layout.set_width(max(1, int(zw * Pango.SCALE)))
-        value_layout.set_ellipsize(Pango.EllipsizeMode.END)
-        _tw, th = value_layout.get_pixel_size()
-        cr.set_source_rgba(rgb[0], rgb[1], rgb[2], alpha)
-        cr.move_to(x0, cy + 2)
-        PangoCairo.show_layout(cr, value_layout)
-
-    def _draw_main_text(self, cr, w, h, strip_h):
-        text = (f"主点击区 · 点击力度 {self._main_force_g}g"
-                if self._main_force_g else "主点击区 · 整板可点击")
-        layout = self._create_layout(text, 11)
-        layout.set_alignment(Pango.Alignment.CENTER)
-        layout.set_width(max(1, int(w * Pango.SCALE)))
-        layout.set_ellipsize(Pango.EllipsizeMode.END)
-        _tw, th = layout.get_pixel_size()
-        fg = self.get_style_context().get_color()
-        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.45)
-        cr.move_to(0, (strip_h + h) / 2 - th / 2)
-        PangoCairo.show_layout(cr, layout)
-
-    def _create_layout(self, text, size_px, weight=Pango.Weight.NORMAL):
-        """继承 widget 的 Pango 上下文/主题字体，仅覆盖大小与字重。
-
-        用 create_pango_layout() 而非 PangoCairo.create_layout(cr)，这样
-        字体族（GNOME 全局字体，如 Cantarell）与语言回退都跟随主题；
-        像素大小用 set_absolute_size()，避免随屏幕分辨率跳变。
-        """
-        layout = self.create_pango_layout(text)
-        font = self.get_pango_context().get_font_description().copy()
-        font.set_absolute_size(size_px * Pango.SCALE)
-        font.set_weight(weight)
-        layout.set_font_description(font)
-        return layout
+    """写配置文件；同上，把 gui.CONFIG_FILE 显式传给实现。"""
+    gui_utils.save_config(CONFIG_FILE, **values)
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -605,8 +106,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.menu_button.set_menu_model(menu)
         header.pack_end(self.menu_button)
 
-        title_label = Gtk.Label(label="Z13/Z16 Gen 2 工具箱")
-        title_label.add_css_class("title")
+        title_label = Adw.WindowTitle(title="Z13/Z16 Gen 2 工具箱",
+                                      subtitle="ThinkPad 触控板与硬件设置")
         header.set_title_widget(title_label)
 
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
@@ -673,10 +174,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.click_scale.set_draw_value(False)
         self.click_scale.connect("value-changed", self._on_click_changed)
         click_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        click_box.set_margin_top(8)
-        click_box.set_margin_bottom(8)
-        click_box.set_margin_start(16)
-        click_box.set_margin_end(16)
+        click_box.add_css_class("card")
+        click_box.set_margin_top(4)
+        click_box.set_margin_bottom(4)
         click_box.append(self.click_label)
         click_box.append(self.click_scale)
 
@@ -687,10 +187,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.release_scale.set_draw_value(False)
         self.release_scale.connect("value-changed", self._on_release_changed)
         release_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        release_box.set_margin_top(8)
-        release_box.set_margin_bottom(8)
-        release_box.set_margin_start(16)
-        release_box.set_margin_end(16)
+        release_box.add_css_class("card")
+        release_box.set_margin_top(4)
+        release_box.set_margin_bottom(4)
         release_box.append(self.release_label)
         release_box.append(self.release_scale)
 
@@ -759,10 +258,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.zone_click_scale.set_draw_value(False)
         self.zone_click_scale.connect("value-changed", self._on_zone_changed)
         zone_click_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        zone_click_box.set_margin_top(8)
-        zone_click_box.set_margin_bottom(8)
-        zone_click_box.set_margin_start(16)
-        zone_click_box.set_margin_end(16)
+        zone_click_box.add_css_class("card")
+        zone_click_box.set_margin_top(4)
+        zone_click_box.set_margin_bottom(4)
         zone_click_box.append(self.zone_click_label)
         zone_click_box.append(self.zone_click_scale)
         zone_group.add(zone_click_box)
@@ -774,10 +272,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.zone_release_scale.set_draw_value(False)
         self.zone_release_scale.connect("value-changed", self._on_zone_changed)
         zone_release_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        zone_release_box.set_margin_top(8)
-        zone_release_box.set_margin_bottom(8)
-        zone_release_box.set_margin_start(16)
-        zone_release_box.set_margin_end(16)
+        zone_release_box.add_css_class("card")
+        zone_release_box.set_margin_top(4)
+        zone_release_box.set_margin_bottom(4)
         zone_release_box.append(self.zone_release_label)
         zone_release_box.append(self.zone_release_scale)
         zone_group.add(zone_release_box)
@@ -795,10 +292,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.scale.connect("value-changed", self._on_value_changed)
 
         slider_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        slider_box.set_margin_top(8)
-        slider_box.set_margin_bottom(8)
-        slider_box.set_margin_start(16)
-        slider_box.set_margin_end(16)
+        slider_box.add_css_class("card")
+        slider_box.set_margin_top(4)
+        slider_box.set_margin_bottom(4)
         slider_box.append(self.value_label)
         slider_box.append(self.scale)
 
@@ -840,10 +336,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.brightness_scale.set_sensitive(False)
         self.brightness_scale.connect("value-changed", self._on_brightness_changed)
         brightness_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        brightness_box.set_margin_top(8)
-        brightness_box.set_margin_bottom(8)
-        brightness_box.set_margin_start(16)
-        brightness_box.set_margin_end(16)
+        brightness_box.add_css_class("card")
+        brightness_box.set_margin_top(4)
+        brightness_box.set_margin_bottom(4)
         brightness_box.append(self.brightness_scale)
         companion_group.add(self.brightness_row)
         companion_group.add(brightness_box)
