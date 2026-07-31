@@ -25,19 +25,32 @@
 # 在仓库的 extensions/ 目录下
 ./install.sh
 # 或:bash install.sh
+```
 
-# 启用(或使用"扩展管理器 / Extensions"应用)
+`install.sh` 幂等:已存在则整体覆盖重装;它把仓库内
+`z13-touchpad-apply` 的绝对路径写进已安装目录的 `cli-path` 文件,并把
+UUID 追加进 GNOME 的启用列表(`org.gnome.shell enabled-extensions`,
+保留其它已启用扩展)——**下次登录/重启后自动启用,无需手动操作**。
+
+若当前 shell 已感知该扩展(扩展目录先于 shell 启动存在),`install.sh`
+会立即启用;若是刚装的,shell 要到下次登录/重启才会扫描到新扩展。
+手动启用(或使用"扩展管理器 / Extensions"应用)仍可用:
+
+```bash
 gnome-extensions enable z13-touchpad-quick@user
 ```
 
-`install.sh` 幂等:已存在则整体覆盖重装;它会把仓库内
-`z13-touchpad-apply` 的绝对路径写进已安装目录的 `cli-path` 文件。
+> 为什么 web 上"从 extensions.gnome.org 一键安装"能立即生效:浏览器插件
+> 通过 D-Bus(`InstallRemoteExtension`)让 shell 自己下载并在运行时加载,
+> 那是 shell 的联网安装路径,本地扩展不适用。本地装的扩展 shell 只在
+> 启动时扫描目录。GNOME 42+ 已移除 `Alt+F2` → `r` 的重载命令,别再用它。
 
 ## 测试
 
 本扩展**无法无头验证**,请在图形会话中:
 
-1. 重新加载 shell:`Alt+F2` → 输入 `r` → 回车(或注销重新登录)。
+1. 注销重新登录(或重启),让 shell 重新扫描扩展目录
+   (`Alt+F2` → `r` 的重载命令在 GNOME 42+ 已移除,不可用)。
 2. 点击右上角状态栏打开快速设置面板,看到"触感强度"开关(图标为触控板)。
 3. 点击开关:开 → 触感明显变强;关 → 无触感。开关状态与 `--get` 一致
    (可在终端用 `z13-touchpad-apply --get` 对比)。

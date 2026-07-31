@@ -1,18 +1,20 @@
 # AGENTS.md
 
-ThinkPad Z13/Z16 Gen 2 Sensel haptic touchpad 工具的项目操作手册。
+ThinkPad Z13/Z16 Gen 2 综合性工具(触控板 + 亮度 + 相机 + 监控等)的项目操作手册。
 本文件给 AI agent 提供在此仓库工作的约定、硬件访问模型与安全规则。
 
 ## 项目概览
 
-小型的 GUI + CLI 工具,控制 ThinkPad Z13/Z16 Gen 2 的 Sensel 触觉触控板:
+以 ThinkPad Z13/Z16 Gen 2 的 Sensel 触觉触控板为核心的综合性工具箱
+(GUI + CLI,窗口标题「Z13/Z16 Gen 2 工具箱」):
 
-- 触感强度(feature 报告 11)、点击力度/释放阈值(固件寄存器)、区域力度、
-  力度预设(light/standard/heavy)
+- 触感强度(feature 报告 11,五档吸附 0/25/50/75/100)、点击力度/释放阈值
+  (固件寄存器)、顶部三键分区力度(含按键预设 light/standard/heavy)、
+  主区力度预设(light/standard/heavy)
 - 登录时与休眠唤醒后自动重新应用(所有设置都是内存态,重启/挂起即丢)
-- HID feature 报告查看器
-- 配套工具:OLED 亮度、IR/RGB 相机检测、GPU reset 监控、硬件探测、
-  GNOME 快速设置扩展
+- HID feature 报告查看器(开发者模式)
+- GUI「配套工具」分组一键入口:GNOME 快速设置扩展安装/卸载、OLED 亮度
+  滑块、相机检测、GPU reset 记录、硬件探测
 - 参考:[Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2)
 
 ## 文件布局
@@ -20,7 +22,7 @@ ThinkPad Z13/Z16 Gen 2 Sensel haptic touchpad 工具的项目操作手册。
 | 文件 | 用途 |
 |---|---|
 | `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
-| `gui.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 设备页 + HID 查看器) |
+| `gui.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 配套工具 + 设备页 + HID 查看器;异步写入队列 + 进度条) |
 | `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
 | `z13-touchpad-tool` | GUI 启动脚本(bash) |
 | `feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
@@ -96,6 +98,7 @@ python3 -m py_compile haptic.py gui.py resume-watch.py feature-probe.py \
 ./feature-probe.py --dump           # 全部 feature 报告
 python3 -m brightness               # 亮度换算单元测试
 python3 -c "import haptic; print(haptic.find_device())"
+GDK_BACKEND=x11 python3 tests/test_gui_e2e.py  # GUI 驱动级 e2e(28 用例,需 DISPLAY)
 systemctl --user status z13-touchpad-haptic.service z13-touchpad-resume.service
 ```
 
