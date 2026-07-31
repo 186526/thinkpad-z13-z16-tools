@@ -7,7 +7,7 @@ This service subscribes to the system D-Bus signal
 org.freedesktop.login1.Manager.PrepareForSleep and re-runs
 z13-touchpad-apply every time the machine wakes up. After a short delay
 (it also restores the display brightness to the kernel-reported value,
-see brightness.py).
+see z13_tools/brightness.py).
 
 --self-test: run the apply step once and exit, without touching D-Bus
 (used by `z13-touchpad-apply --watch-test`; a fake signal is never
@@ -21,10 +21,16 @@ import os
 import subprocess
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-APPLY_SCRIPT = os.path.join(BASE_DIR, "z13-touchpad-apply")
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+# 仓库根 = 向上找含 z13_tools 包的祖先目录（源码树与 AppImage 通用）。
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isdir(os.path.join(REPO_ROOT, "z13_tools")):
+    _parent = os.path.dirname(REPO_ROOT)
+    if _parent == REPO_ROOT:
+        break
+    REPO_ROOT = _parent
+APPLY_SCRIPT = os.path.join(REPO_ROOT, "bin", "z13-touchpad-apply")
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 
 def run_apply():
@@ -42,7 +48,7 @@ def _restore_brightness():
     here only warns on stderr and never crashes the watcher.
     """
     try:
-        from brightness import get_brightness, set_brightness
+        from z13_tools.brightness import get_brightness, set_brightness
     except ImportError as e:
         print(f"无法导入 brightness 模块，跳过亮度恢复: {e}", file=sys.stderr)
         return 0

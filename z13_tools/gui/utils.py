@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 
-import haptic
+from z13_tools import haptic
 
 # 通过 from gui_utils import * 重导出到 gui.py 的公共名字。
 # load_config / save_config 会被 gui.py 的包装层覆盖（传入显式 path）。
@@ -37,8 +37,11 @@ __all__ = [
     "systemctl", "autostart_enabled", "set_autostart",
 ]
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-APPLY_SCRIPT = os.path.join(BASE_DIR, "z13-touchpad-apply")
+# 仓库根 = z13_tools/gui/ 的上两级；源码树与 AppImage 内（usr/share/
+# z13-tools/）结构一致，脚本/监控/扩展统一从这里派生。
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # z13_tools/gui
+REPO_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
+APPLY_SCRIPT = os.path.join(REPO_ROOT, "bin", "z13-touchpad-apply")
 
 CONFIG_DIR = os.path.expanduser("~/.config/z13-g2-tools")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -48,7 +51,7 @@ UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 UNIT_FILE = os.path.join(UNIT_DIR, UNIT_NAME)
 UNIT_RESUME = "z13-touchpad-resume.service"
 UNIT_RESUME_FILE = os.path.join(UNIT_DIR, UNIT_RESUME)
-RESUME_WATCH_SCRIPT = os.path.join(BASE_DIR, "resume-watch.py")
+RESUME_WATCH_SCRIPT = os.path.join(REPO_ROOT, "monitors", "resume-watch.py")
 
 _UNIT_APPLY = (
     "[Unit]\n"
@@ -105,9 +108,9 @@ ZONE_PRESET_LABELS = {"light": "轻触", "standard": "标准", "heavy": "重按"
 
 EXT_UUID = "z13-touchpad-quick@user"
 EXT_DIR = os.path.expanduser(f"~/.local/share/gnome-shell/extensions/{EXT_UUID}")
-EXT_INSTALL_SCRIPT = os.path.join(BASE_DIR, "extensions", "install.sh")
-CAMERA_SCRIPT = os.path.join(BASE_DIR, "z13-camera-tool")
-PROBE_SCRIPT = os.path.join(BASE_DIR, "hw-probe.py")
+EXT_INSTALL_SCRIPT = os.path.join(REPO_ROOT, "extensions", "install.sh")
+CAMERA_SCRIPT = os.path.join(REPO_ROOT, "bin", "z13-camera-tool")
+PROBE_SCRIPT = os.path.join(REPO_ROOT, "bin", "z13-hw-probe")
 GPU_RESET_LOG = os.path.join(CONFIG_DIR, "gpu-resets.log")
 
 

@@ -22,7 +22,7 @@ fi
 # 写进安装目录的 cli-path 文件,扩展加载时优先使用。
 CLI="$(command -v z13-touchpad-apply || true)"
 if [ -z "$CLI" ]; then
-    CLI="$(cd "$(dirname "$0")/.." && pwd)/z13-touchpad-apply"
+    CLI="$(cd "$(dirname "$0")/.." && pwd)/bin/z13-touchpad-apply"
 fi
 if [ ! -x "$CLI" ]; then
     echo "警告:找不到可执行的 z13-touchpad-apply($CLI)。" >&2

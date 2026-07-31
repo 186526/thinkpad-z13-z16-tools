@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Launcher for the Z13 haptic touchpad settings GUI.
+# 向上找含 z13_tools 包的仓库根（源码树与 AppImage 通用）。
+HERE="$(dirname "$(readlink -f "$0")")"
+ROOT="$HERE"
+while [ ! -d "$ROOT/z13_tools" ] && [ "$ROOT" != "/" ]; do
+    ROOT="$(dirname "$ROOT")"
+done
+exec python3 "$ROOT/z13_tools/gui/app.py" "$@"

@@ -36,7 +36,7 @@ jobs:
           else
             VERSION="$GITHUB_REF_NAME"
           fi
-          VERSION="$VERSION" APPIMAGETOOL=/tmp/appimagetool ./build-appimage.sh
+          VERSION="$VERSION" APPIMAGETOOL=/tmp/appimagetool ./packaging/build-appimage.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

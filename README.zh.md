@@ -51,7 +51,7 @@ chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
 自行构建(需要 `appimagetool`):
 
 ```bash
-VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
+VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
 ```
 
 注意:AppImage 提供的是 GUI;命令行工具(`z13-touchpad-apply` 等)请从源码
@@ -59,7 +59,7 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
 
 ### 依赖
 
-- Python 3.9+(`haptic.py` / CLI 仅需标准库)
+- Python 3.9+(`z13_tools/haptic.py` / CLI 仅需标准库)
 - GUI 需要 PyGObject(`python3-gi`)、GTK4、libadwaita
   (Debian: `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1`)
 - 对 `/dev/hidraw*` 的读写权限(如 `plugdev` 组成员,或登录席位下的
@@ -68,39 +68,39 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
 ### 启动 GUI
 
 ```bash
-./z13-touchpad-tool            # 正常模式
-./z13-touchpad-tool --developer  # 开发者模式(追加 HID 功能 / 设备页)
+./bin/z13-touchpad-tool            # 正常模式
+./bin/z13-touchpad-tool --developer  # 开发者模式(追加 HID 功能 / 设备页)
 ```
 
 ### 命令行示例
 
 ```bash
 # 触控板 —— 触感强度(feature 报告通道)
-./z13-touchpad-apply --get                    # 查看当前强度(0-100)
-./z13-touchpad-apply --set 80                 # 设置强度并保存
+./bin/z13-touchpad-apply --get                    # 查看当前强度(0-100)
+./bin/z13-touchpad-apply --set 80                 # 设置强度并保存
 
 # 触控板 —— 固件寄存器(点击力度等)
-./z13-touchpad-apply --show                   # 查看全部寄存器
-./z13-touchpad-apply --set-click-force 100g   # 点击力度(克)
-./z13-touchpad-apply --set-click-release 65g  # 释放阈值(克)
-./z13-touchpad-apply --set-haptic 60%         # 经寄存器管道设置触感强度
-./z13-touchpad-apply --set-zone left 100 65   # 左区点击+释放(克;不写释放则取点击的 65%)
-./z13-touchpad-apply --profile heavy          # 应用预设(light|standard|heavy)
+./bin/z13-touchpad-apply --show                   # 查看全部寄存器
+./bin/z13-touchpad-apply --set-click-force 100g   # 点击力度(克)
+./bin/z13-touchpad-apply --set-click-release 65g  # 释放阈值(克)
+./bin/z13-touchpad-apply --set-haptic 60%         # 经寄存器管道设置触感强度
+./bin/z13-touchpad-apply --set-zone left 100 65   # 左区点击+释放(克;不写释放则取点击的 65%)
+./bin/z13-touchpad-apply --profile heavy          # 应用预设(light|standard|heavy)
 
 # 触控板 —— 设备与寄存器
-./z13-touchpad-apply --list-devices           # 列出全部 /dev/hidraw* 及 HID_NAME
-./z13-touchpad-apply --reg 0x0038 read        # 读一个固件寄存器
-./z13-touchpad-apply --reg 0x00AB 70          # 写一个寄存器(已知键自动换算克/百分比)
-./z13-touchpad-apply --watch-test             # 唤醒监听器自检一次(会重新应用配置)
+./bin/z13-touchpad-apply --list-devices           # 列出全部 /dev/hidraw* 及 HID_NAME
+./bin/z13-touchpad-apply --reg 0x0038 read        # 读一个固件寄存器
+./bin/z13-touchpad-apply --reg 0x00AB 70          # 写一个寄存器(已知键自动换算克/百分比)
+./bin/z13-touchpad-apply --watch-test             # 唤醒监听器自检一次(会重新应用配置)
 
 # 应用已保存的配置(登录服务调用);无参数运行即此行为
-./z13-touchpad-apply
+./bin/z13-touchpad-apply
 
 # 亮度 / 相机
-./z13-brightness-apply --get                  # 当前亮度
-./z13-brightness-apply --set 50               # 设置亮度 0-100
-./z13-brightness-apply --to-windows 30        # Linux 30% ≈ Windows 多少 %
-./z13-camera-tool                             # 列出相机并标注 IR/RGB
+./bin/z13-brightness-apply --get                  # 当前亮度
+./bin/z13-brightness-apply --set 50               # 设置亮度 0-100
+./bin/z13-brightness-apply --to-windows 30        # Linux 30% ≈ Windows 多少 %
+./bin/z13-camera-tool                             # 列出相机并标注 IR/RGB
 ```
 
 配置保存在 `~/.config/z13-g2-tools/config.json`。
@@ -141,7 +141,7 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
 - **相机检测** —— 「重新检测」按钮实时探测 IR / RGB 相机。
 - **GPU 重置监控** —— 只读展示最近的 amdgpu 重置记录(常驻监听由
   systemd 用户服务运行,见下文)。
-- **硬件探测** —— 「运行」按钮执行 `hw-probe.py`,结果写入
+- **硬件探测** —— 「运行」按钮执行 `bin/z13-hw-probe`,结果写入
   [docs/hardware-findings.md](docs/hardware-findings.md)。
 
 ### 开发者模式
@@ -199,34 +199,34 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
 IR 判定:名称含 IR(整词)或 USB ID 匹配 `04f2:b78c`;RGB 为 `04f2:b78b`。
 详见下文「相机切换引导」。
 
-### `feature-probe.py`(实验性,危险)
+### `experiments/feature-probe.py`(实验性,危险)
 
 feature 报告 7(256 字节 Win8 PTP blob)的单字段读写器,写前自动保存快照
 到 `/tmp/z13_bank_snapshot.bin`:
 
 ```bash
-./feature-probe.py --dump                # 显示全部 feature 报告
-./feature-probe.py --read 7              # 读报告 7
-./feature-probe.py --write 7 0x00        # 写报告 7 的一个字段(先快照)
-./feature-probe.py --restore             # 还原快照
-./feature-probe.py --device /dev/hidrawN # 指定设备(默认自动探测)
+./experiments/feature-probe.py --dump                # 显示全部 feature 报告
+./experiments/feature-probe.py --read 7              # 读报告 7
+./experiments/feature-probe.py --write 7 0x00        # 写报告 7 的一个字段(先快照)
+./experiments/feature-probe.py --restore             # 还原快照
+./experiments/feature-probe.py --device /dev/hidrawN # 指定设备(默认自动探测)
 ```
 
 **危险实验:只能在图形会话中人工测试触控板行为时运行;不要绕过它直接写
 report 7 或未知寄存器。**
 
-### `gpu-reset-watch.py`(GPU reset 监控)
+### `monitors/gpu-reset-watch.py`(GPU reset 监控)
 
 监听内核日志中的 amdgpu GPU reset / RAS 事件,追加时间戳行到
 `~/.config/z13-g2-tools/gpu-resets.log`,可用时弹桌面通知。详见下文
 「GPU reset 监控」。
 
-### `hw-probe.py`(硬件探测)
+### `bin/z13-hw-probe`(硬件探测)
 
 探测指纹(`06cb:0123`)、TPM 与 IR / RGB 相机,结果写入
 `docs/hardware-findings.md`;`--no-write` 只打印不写文件。
 
-### `resume-watch.py`(唤醒监听)
+### `monitors/resume-watch.py`(唤醒监听)
 
 D-Bus `PrepareForSleep` 监听:机器唤醒后重跑 `z13-touchpad-apply` 并(延迟
 约 1.5 秒)恢复内核所报的显示亮度。`--self-test` 模式用于自检,由
@@ -303,7 +303,7 @@ gnome-extensions enable z13-touchpad-quick@user
 |---|---|---|---|---|---|
 | Windows % | 0 | 20 | 75 | 95 | 100 |
 
-- 休眠唤醒后,`resume-watch.py` 会把亮度恢复到内核所报的值。
+- 休眠唤醒后,`monitors/resume-watch.py` 会把亮度恢复到内核所报的值。
 
 ## 相机切换引导
 
@@ -321,7 +321,7 @@ web 应用倾向优先选 IR 相机(`04f2:b78c`)导致画面失败 / 黑屏,`z13
 ## GPU reset 监控
 
 amdgpu GPU reset(如遇驱动异常自动重置 GPU)会造成短暂黑屏 / 卡顿,值得
-留档排查。`gpu-reset-watch.py`:
+留档排查。`monitors/gpu-reset-watch.py`:
 
 - 匹配内核日志中 `GPU reset` 或 (amdgpu + RAS) 的行;
 - 追加时间戳行到 `~/.config/z13-g2-tools/gpu-resets.log`(目录自动创建);
@@ -338,7 +338,7 @@ GUI 的「GPU 重置监控」行只读展示记录,常驻监听由上述服务(�
 
 ## 硬件探测
 
-`hw-probe.py` 只读探测指纹、TPM 与 IR / RGB 相机,把结果写入
+`bin/z13-hw-probe` 只读探测指纹、TPM 与 IR / RGB 相机,把结果写入
 [docs/hardware-findings.md](docs/hardware-findings.md)(`--no-write` 只打印)。
 本机(Z13 Gen 2)当前结果摘要:
 
@@ -407,7 +407,7 @@ uevent 中的 `SNSL002` 或 `00002C2F:0000002`。使用两条通道:
 - **CLI 报「无法打开 /dev/hidrawN」** —— 当前用户不在 `plugdev` 组且未
   获得 udev uaccess 授权。加入 `plugdev` 组后重新登录,或确认登录席位
   uaccess。注意 hidraw1 是 Wacom 触屏,不要碰。
-- **找不到触控板** —— 用 `./z13-touchpad-apply --list-devices` 检查;
+- **找不到触控板** —— 用 `./bin/z13-touchpad-apply --list-devices` 检查;
   检测匹配 uevent 里的 `SNSL002` 或 `00002C2F:0000002`。
 - **亮度 `--set` 失败** —— 权限不足,见
   [docs/brightness-permissions.md](docs/brightness-permissions.md) 方案 A。
@@ -438,24 +438,32 @@ uevent 中的 `SNSL002` 或 `00002C2F:0000002`。使用两条通道:
 
 ## 文件
 
-| 文件 | 用途 |
+按功能分层:`z13_tools/` 为可导入的 Python 包(CLI 仅需标准库,因此包
+`__init__` 刻意不导入 GUI);`bin/` 放 CLI 入口;`monitors/` 放常驻监控;
+`experiments/` 放实验性(有风险)探测工具;`packaging/` 放 AppImage 构建。
+
+| 路径 | 用途 |
 |---|---|
-| `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
-| `gui.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 配套工具 + 开发者模式) |
-| `z13-touchpad-apply` | 触控板 CLI(应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test`) |
-| `z13-touchpad-tool` | GUI 启动脚本(透传参数,如 `--developer`) |
-| `feature-probe.py` | 实验性 report 7(256B Win8 PTP blob)读写器,带快照/还原(危险) |
-| `resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑应用配置 + 恢复亮度 |
-| `brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
-| `z13-brightness-apply` | 亮度 CLI(`--get` / `--set` / `--to-windows` / `--to-linux` / `--device`) |
-| `z13-camera-tool` | IR/RGB 相机检测 + 应用级切换引导(`--json` / `--no-pw`) |
-| `gpu-reset-watch.py` | 内核日志监听,记录 amdgpu reset + 桌面通知 |
-| `hw-probe.py` | 指纹 / TPM / 摄像头探测 → `docs/hardware-findings.md` |
-| `blob-sweep.py` | 实验性 report 7 逐字节扫描器,带快照/还原(危险,未运行) |
+| `z13_tools/haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
+| `z13_tools/brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
+| `z13_tools/gui/app.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 配套工具 + 开发者模式) |
+| `z13_tools/gui/utils.py` | GUI 的非 GTK 支撑:常量、配置读写、systemd 自启动、配套工具 |
+| `z13_tools/gui/touchpad_map.py` | 自绘可点击触控板组件(`TouchpadMap`) |
+| `bin/z13-touchpad-apply` | 触控板 CLI(应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test`) |
+| `bin/z13-touchpad-tool` | GUI 启动脚本(透传参数,如 `--developer`) |
+| `bin/z13-brightness-apply` | 亮度 CLI(`--get` / `--set` / `--to-windows` / `--to-linux` / `--device`) |
+| `bin/z13-camera-tool` | IR/RGB 相机检测 + 应用级切换引导(`--json` / `--no-pw`) |
+| `bin/z13-hw-probe` | 指纹 / TPM / 摄像头探测 → `docs/hardware-findings.md` |
+| `monitors/resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑应用配置 + 恢复亮度 |
+| `monitors/gpu-reset-watch.py` | 内核日志监听,记录 amdgpu reset + 桌面通知 |
+| `experiments/feature-probe.py` | 实验性 report 7(256B Win8 PTP blob)读写器,带快照/还原(危险) |
+| `experiments/blob-sweep.py` | 实验性 report 7 逐字节扫描器,带快照/还原(危险,未运行) |
+| `packaging/build-appimage.sh` | AppImage 构建脚本(本地与 CI 共用) |
+| `packaging/icon-*.png` | 应用图标 |
 | `extensions/z13-touchpad-quick@user` | GNOME 快速设置触感开关扩展 |
 | `extensions/install.sh` | 扩展安装脚本(幂等,写入启用列表) |
 | `docs/` | 权限说明 + 硬件探测结果 |
-| `tests/test_gui_e2e.py` | 驱动级 e2e 测试(28 用例,需 DISPLAY:`GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |
+| `tests/test_gui_e2e.py` | 驱动级 e2e 测试(29 用例,需 DISPLAY:`GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |
 
 ## 许可证
 

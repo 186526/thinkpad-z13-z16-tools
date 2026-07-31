@@ -4,14 +4,24 @@
 (仅作硬件参考资料,不向其提交任何内容——本地自用)
 
 开工前先读 `AGENTS.md`(硬件访问模型、寄存器表、安全红线、无头验证手段)。
+
+> **布局说明(v0.2.0)**:仓库已按功能重组为 `z13_tools/`(Python 包:haptic /
+> brightness / gui 子包)、`bin/`(CLI 入口)、`monitors/`(常驻监控)、
+> `experiments/`(实验脚本)、`packaging/`(AppImage 构建)。下文提到的
+> `haptic.py` → `z13_tools/haptic.py`;`gui.py` → `z13_tools/gui/app.py`;
+> `gui_utils.py` → `z13_tools/gui/utils.py`;`touchpad_map.py` →
+> `z13_tools/gui/touchpad_map.py`;`z13-touchpad-apply` → `bin/z13-touchpad-apply`;
+> `resume-watch.py` → `monitors/resume-watch.py`;`feature-probe.py` →
+> `experiments/feature-probe.py`,其余依此类推。
+
 以下按依赖关系分 4 个阶段。功能号 1-12(原 13 项去掉「wiki 更新」后顺延
 编号)。每项都含:目标 → 涉及文件 → 实施步骤 → 验证 → 风险。
 
 **跨功能公共事项**(每做完一项都要做):
 
-- 新增 CLI 选项 → 更新 `z13-touchpad-apply` 的 docstring 用法说明。
-- 新增配置键 → 若需登录时恢复,加入 `apply.py` 的 `PERSISTED` 元组。
-- 新增 GUI 控件/页面 → 更新 `gui.py` 顶部模块 docstring。
+- 新增 CLI 选项 → 更新 `bin/z13-touchpad-apply` 的 docstring 用法说明。
+- 新增配置键 → 若需登录时恢复,加入 `bin/z13-touchpad-apply` 的 `PERSISTED` 元组。
+- 新增 GUI 控件/页面 → 更新 `z13_tools/gui/app.py` 顶部模块 docstring。
 - 更新 `README.md` 与 `README.zh.md`(两份保持同步)。
 - 所有脚本保持 `python3 -m py_compile` 通过。
 
@@ -19,9 +29,10 @@
 
 ## Phase 0 — 现状核对(必做,30 分钟)
 
-1. 通读 `haptic.py`、`gui.py`、`z13-touchpad-apply`、`feature-probe.py`、
-   `resume-watch.py`。
-2. 无头验证基线:`./z13-touchpad-apply --get`、`--show`、`./feature-probe.py --dump`,
+1. 通读 `z13_tools/haptic.py`、`z13_tools/gui/app.py`、`bin/z13-touchpad-apply`、
+   `experiments/feature-probe.py`、`monitors/resume-watch.py`。
+2. 无头验证基线:`./bin/z13-touchpad-apply --get`、`--show`、
+   `./experiments/feature-probe.py --dump`,
    确认设备在 `/dev/hidraw0`、所有寄存器可读。
 3. 确认服务状态:`systemctl --user status z13-touchpad-haptic.service
    z13-touchpad-resume.service`(两个都应 enabled,resume 应 active)。

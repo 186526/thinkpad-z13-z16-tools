@@ -23,8 +23,14 @@ import subprocess
 import sys
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FINDINGS_FILE = os.path.join(BASE_DIR, "docs", "hardware-findings.md")
+# 仓库根 = 向上找含 z13_tools 包的祖先目录（源码树与 AppImage 通用）。
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isdir(os.path.join(REPO_ROOT, "z13_tools")):
+    _parent = os.path.dirname(REPO_ROOT)
+    if _parent == REPO_ROOT:
+        break
+    REPO_ROOT = _parent
+FINDINGS_FILE = os.path.join(REPO_ROOT, "docs", "hardware-findings.md")
 
 # Synaptics 指纹 06cb:0123
 FP_VENDOR, FP_PRODUCT = "06cb", "0123"

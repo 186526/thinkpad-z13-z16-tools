@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# Launcher for the Z13 haptic touchpad settings GUI.
-exec python3 "$(dirname "$(readlink -f "$0")")/gui.py" "$@"

@@ -14,18 +14,20 @@ APP_NAME="thinkpad-z13-z16-tools"
 APP_TITLE="Z13/Z16 Gen 2 工具箱"
 DESKTOP_ID="io.github.thinkpad-z13-z16-tools"
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
-ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"   # packaging/ 的上级 = 仓库根
 DIST="$ROOT/dist"
 APPDIR="$DIST/AppDir"
 ARCH_DIR="x86_64-linux-gnu"          # Debian/Ubuntu 多架构目录名
 LIBDIR="$APPDIR/usr/lib/$ARCH_DIR"
 
-# 需要打包进 AppImage 的项目文件
-PROJECT_FILES=(
-  haptic.py gui.py gui_utils.py touchpad_map.py brightness.py resume-watch.py
-  feature-probe.py gpu-reset-watch.py hw-probe.py blob-sweep.py
-  z13-touchpad-apply z13-brightness-apply z13-camera-tool z13-touchpad-tool
+# 需要打包进 AppImage 的项目目录（递归拷贝；z13_tools 是 Python 包）
+PROJECT_DIRS=(
+  z13_tools bin monitors experiments
 )
+
+# AppDir 内项目代码的安装位置（保留源码树结构，z13_tools 包的内建
+# "向上找仓库根"算法在 AppImage 内同样成立）
+PROJECT_DIR="$APPDIR/usr/share/z13-tools"
 
 # GTK 运行期 dlopen（不在静态依赖链里）需要显式收集的库
 EXTRA_LIBS=(
@@ -75,10 +77,13 @@ collect_libs() {
 rm -rf "$DIST/AppDir"
 mkdir -p "$APPDIR/usr/bin" "$LIBDIR"
 
-log "拷贝项目文件"
-for f in "${PROJECT_FILES[@]}"; do
-  cp "$ROOT/$f" "$APPDIR/usr/bin/"
+log "拷贝项目文件（$PROJECT_DIR）"
+mkdir -p "$PROJECT_DIR"
+for d in "${PROJECT_DIRS[@]}"; do
+  cp -r "$ROOT/$d" "$PROJECT_DIR/"
 done
+# 剔除 Python 运行期产物
+find "$PROJECT_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
 
 log "拷贝 Python 解释器与标准库"
 PYBIN="$(command -v python3)"
@@ -169,8 +174,8 @@ export GSETTINGS_SCHEMA_DIR="\$HERE/usr/share/glib-2.0/schemas"
 export GDK_PIXBUF_MODULEDIR="\$HERE/usr/lib/$ARCH_DIR/gdk-pixbuf-2.0/2.10.0/loaders"
 export XDG_DATA_DIRS="\$HERE/usr/share\${XDG_DATA_DIRS:+:\$XDG_DATA_DIRS}"
 export PYTHONHOME="\$HERE/usr"
-export PYTHONPATH="\$HERE/usr/bin:\$HERE/usr/lib/python$PYV/site-packages"
-exec "\$HERE/usr/bin/python3" "\$HERE/usr/bin/gui.py" "\$@"
+export PYTHONPATH="\$HERE/usr/share/z13-tools:\$HERE/usr/lib/python$PYV/site-packages"
+exec "\$HERE/usr/bin/python3" "\$HERE/usr/share/z13-tools/z13_tools/gui/app.py" "\$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 

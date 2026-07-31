@@ -62,7 +62,7 @@ chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
 Build it yourself (requires `appimagetool`):
 
 ```bash
-VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./build-appimage.sh
+VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
 ```
 
 Note: the AppImage ships the GUI; the command-line tools
@@ -71,7 +71,7 @@ CI builds the AppImage on every `v*` tag push and attaches it to the release.
 
 ### Requirements
 
-- Python 3.9+ (`haptic.py` / the CLIs need only the standard library)
+- Python 3.9+ (`z13_tools/haptic.py` / the CLIs need only the standard library)
 - For the GUI: PyGObject (`python3-gi`), GTK4 and libadwaita
   (Debian: `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1`)
 - Read/write access to `/dev/hidraw*` (e.g. member of the `plugdev` group,
@@ -80,40 +80,40 @@ CI builds the AppImage on every `v*` tag push and attaches it to the release.
 ### Launch the GUI
 
 ```bash
-./z13-touchpad-tool            # normal mode
-./z13-touchpad-tool --developer  # developer mode (adds HID / device pages)
+./bin/z13-touchpad-tool            # normal mode
+./bin/z13-touchpad-tool --developer  # developer mode (adds HID / device pages)
 ```
 
 ### CLI examples
 
 ```bash
 # Touchpad — haptic intensity (feature-report path)
-./z13-touchpad-apply --get                    # print current intensity (0-100)
-./z13-touchpad-apply --set 80                 # set intensity and save it
+./bin/z13-touchpad-apply --get                    # print current intensity (0-100)
+./bin/z13-touchpad-apply --set 80                 # set intensity and save it
 
 # Touchpad — firmware registers (click force etc.)
-./z13-touchpad-apply --show                   # show all registers
-./z13-touchpad-apply --set-click-force 100g   # click force in grams
-./z13-touchpad-apply --set-click-release 65g  # release threshold in grams
-./z13-touchpad-apply --set-haptic 60%         # haptic intensity via the register pipe
-./z13-touchpad-apply --set-zone left 100 65   # left-zone click+release (g; omit release → 65% of click)
-./z13-touchpad-apply --profile heavy          # apply a preset (light|standard|heavy)
+./bin/z13-touchpad-apply --show                   # show all registers
+./bin/z13-touchpad-apply --set-click-force 100g   # click force in grams
+./bin/z13-touchpad-apply --set-click-release 65g  # release threshold in grams
+./bin/z13-touchpad-apply --set-haptic 60%         # haptic intensity via the register pipe
+./bin/z13-touchpad-apply --set-zone left 100 65   # left-zone click+release (g; omit release → 65% of click)
+./bin/z13-touchpad-apply --profile heavy          # apply a preset (light|standard|heavy)
 
 # Touchpad — device & registers
-./z13-touchpad-apply --list-devices           # list all /dev/hidraw* with HID_NAME
-./z13-touchpad-apply --reg 0x0038 read        # read one firmware register
-./z13-touchpad-apply --reg 0x00AB 70          # write one register (grams/percent auto-converted for known ones)
-./z13-touchpad-apply --watch-test             # run the resume-watcher self-test once (re-applies the config)
+./bin/z13-touchpad-apply --list-devices           # list all /dev/hidraw* with HID_NAME
+./bin/z13-touchpad-apply --reg 0x0038 read        # read one firmware register
+./bin/z13-touchpad-apply --reg 0x00AB 70          # write one register (grams/percent auto-converted for known ones)
+./bin/z13-touchpad-apply --watch-test             # run the resume-watcher self-test once (re-applies the config)
 
 # Apply the saved config (what the login service runs); this is also the
 # no-argument behaviour
-./z13-touchpad-apply
+./bin/z13-touchpad-apply
 
 # Brightness / camera
-./z13-brightness-apply --get                  # current brightness
-./z13-brightness-apply --set 50               # set brightness 0-100
-./z13-brightness-apply --to-windows 30        # Linux 30% ≈ how many Windows %?
-./z13-camera-tool                             # list cameras labelled IR/RGB
+./bin/z13-brightness-apply --get                  # current brightness
+./bin/z13-brightness-apply --set 50               # set brightness 0-100
+./bin/z13-brightness-apply --to-windows 30        # Linux 30% ≈ how many Windows %?
+./bin/z13-camera-tool                             # list cameras labelled IR/RGB
 ```
 
 Configuration is stored in `~/.config/z13-g2-tools/config.json`.
@@ -166,7 +166,7 @@ window: while a device write is in flight it shows a spinner and
   IR/RGB cameras on demand.
 - **GPU 重置监控** (GPU-reset monitor) — read-only display of recent amdgpu
   resets (the persistent watcher is a systemd user service, see below).
-- **硬件探测** (hardware probe) — 「运行」 (run) button executes `hw-probe.py`,
+- **硬件探测** (hardware probe) — 「运行」 (run) button executes `bin/z13-hw-probe`,
   writing [docs/hardware-findings.md](docs/hardware-findings.md).
 
 ### Developer mode
@@ -226,35 +226,35 @@ On permission failures it prints a clear Chinese error pointing to
 IR is decided by a name containing IR (as a word) or a USB ID of
 `04f2:b78c`; the RGB camera is `04f2:b78b`. See 「Camera switching」 below.
 
-### `feature-probe.py` (experimental — dangerous)
+### `experiments/feature-probe.py` (experimental — dangerous)
 
 Single-field read/writer for feature report 7 (the 256-byte Win8 PTP blob);
 it snapshots the bank to `/tmp/z13_bank_snapshot.bin` before writing:
 
 ```bash
-./feature-probe.py --dump                # show all feature reports
-./feature-probe.py --read 7              # read report 7
-./feature-probe.py --write 7 0x00        # write one field of report 7 (snapshotted first)
-./feature-probe.py --restore             # restore the saved snapshot
-./feature-probe.py --device /dev/hidrawN # explicit device (default: auto-detect)
+./experiments/feature-probe.py --dump                # show all feature reports
+./experiments/feature-probe.py --read 7              # read report 7
+./experiments/feature-probe.py --write 7 0x00        # write one field of report 7 (snapshotted first)
+./experiments/feature-probe.py --restore             # restore the saved snapshot
+./experiments/feature-probe.py --device /dev/hidrawN # explicit device (default: auto-detect)
 ```
 
 **Only run from a graphical session while testing the touchpad by hand;
 never write report 7 or unknown registers past this tool.**
 
-### `gpu-reset-watch.py` (GPU-reset monitor)
+### `monitors/gpu-reset-watch.py` (GPU-reset monitor)
 
 Watches the kernel log for amdgpu GPU-reset / RAS events, appends
 timestamped lines to `~/.config/z13-g2-tools/gpu-resets.log` and shows a
 desktop notification when possible. See 「GPU-reset monitor」 below.
 
-### `hw-probe.py` (hardware probe)
+### `bin/z13-hw-probe` (hardware probe)
 
 Probes the fingerprint reader (`06cb:0123`), TPM and IR/RGB cameras and
 writes [docs/hardware-findings.md](docs/hardware-findings.md);
 `--no-write` prints without writing.
 
-### `resume-watch.py` (suspend watcher)
+### `monitors/resume-watch.py` (suspend watcher)
 
 Listens on the D-Bus `PrepareForSleep` signal, re-runs `z13-touchpad-apply`
 after wake and (after ~1.5 s) restores the kernel-reported display
@@ -339,7 +339,7 @@ gnome-extensions enable z13-touchpad-quick@user
 |---|---|---|---|---|---|
 | Windows % | 0 | 20 | 75 | 95 | 100 |
 
-- After suspend, `resume-watch.py` restores the kernel-reported brightness.
+- After suspend, `monitors/resume-watch.py` restores the kernel-reported brightness.
 
 ## Camera switching
 
@@ -360,7 +360,7 @@ how to switch:
 
 An amdgpu GPU reset (the driver auto-resets the GPU on faults) causes a
 brief black screen / stutter, worth logging for later debugging.
-`gpu-reset-watch.py`:
+`monitors/gpu-reset-watch.py`:
 
 - matches kernel-log lines containing `GPU reset` or (amdgpu + RAS);
 - appends timestamped lines to `~/.config/z13-g2-tools/gpu-resets.log`
@@ -380,7 +380,7 @@ running it in the foreground).
 
 ## Hardware probe
 
-`hw-probe.py` read-only-probes the fingerprint reader, TPM and IR/RGB
+`bin/z13-hw-probe` read-only-probes the fingerprint reader, TPM and IR/RGB
 cameras and writes [docs/hardware-findings.md](docs/hardware-findings.md)
 (`--no-write` prints only). Current results on this Z13 Gen 2:
 
@@ -457,7 +457,7 @@ writes are RAM-only.
   the `plugdev` group and has no udev uaccess grant. Join `plugdev` and log
   back in, or verify seat uaccess. Note that hidraw1 is the Wacom touch
   screen — leave it alone.
-- **Touchpad not found** — run `./z13-touchpad-apply --list-devices`;
+- **Touchpad not found** — run `./bin/z13-touchpad-apply --list-devices`;
   detection matches `SNSL002` or `00002C2F:0000002` in uevent.
 - **Brightness `--set` fails** — permission problem; see
   [docs/brightness-permissions.md](docs/brightness-permissions.md) option A.
@@ -492,24 +492,33 @@ Z13 Gen 2 matches the documented defaults exactly.
 
 ## Files
 
-| File | Purpose |
+Layout by function: `z13_tools/` is the importable Python package (CLIs need
+only the stdlib, so the package `__init__` deliberately does not import the
+GUI); `bin/` holds the CLI entrypoints; `monitors/` the always-on watchers;
+`experiments/` the risky probe tools; `packaging/` the AppImage build.
+
+| Path | Purpose |
 |---|---|
-| `haptic.py` | device detection + feature-report ioctls + register pipe (stdlib only, core) |
-| `gui.py` | GTK4/libadwaita GUI (settings + presets + zones + companion tools + developer mode) |
-| `z13-touchpad-apply` | touchpad CLI (apply config / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test`) |
-| `z13-touchpad-tool` | GUI launcher (passes arguments through, e.g. `--developer`) |
-| `feature-probe.py` | experimental report-7 (256B Win8 PTP blob) reader/writer with snapshot/restore (dangerous) |
-| `resume-watch.py` | D-Bus `PrepareForSleep` watcher; re-applies settings + brightness after suspend |
-| `brightness.py` | OLED backlight detection + read/write + Linux↔Windows scale (stdlib only) |
-| `z13-brightness-apply` | brightness CLI (`--get` / `--set` / `--to-windows` / `--to-linux` / `--device`) |
-| `z13-camera-tool` | IR/RGB camera detection + app-level switching guidance (`--json` / `--no-pw`) |
-| `gpu-reset-watch.py` | kernel-log watcher that logs amdgpu resets + desktop notification |
-| `hw-probe.py` | fingerprint / TPM / camera probe → `docs/hardware-findings.md` |
-| `blob-sweep.py` | experimental report-7 byte sweeper with snapshot/restore (dangerous, not run) |
+| `z13_tools/haptic.py` | device detection + feature-report ioctls + register pipe (stdlib only, core) |
+| `z13_tools/brightness.py` | OLED backlight detection + read/write + Linux↔Windows scale (stdlib only) |
+| `z13_tools/gui/app.py` | GTK4/libadwaita GUI (settings + presets + zones + companion tools + developer mode) |
+| `z13_tools/gui/utils.py` | GUI's non-GTK support: constants, config IO, systemd autostart, companion tools |
+| `z13_tools/gui/touchpad_map.py` | self-drawn clickable touchpad widget (`TouchpadMap`) |
+| `bin/z13-touchpad-apply` | touchpad CLI (apply config / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test`) |
+| `bin/z13-touchpad-tool` | GUI launcher (passes arguments through, e.g. `--developer`) |
+| `bin/z13-brightness-apply` | brightness CLI (`--get` / `--set` / `--to-windows` / `--to-linux` / `--device`) |
+| `bin/z13-camera-tool` | IR/RGB camera detection + app-level switching guidance (`--json` / `--no-pw`) |
+| `bin/z13-hw-probe` | fingerprint / TPM / camera probe → `docs/hardware-findings.md` |
+| `monitors/resume-watch.py` | D-Bus `PrepareForSleep` watcher; re-applies settings + brightness after suspend |
+| `monitors/gpu-reset-watch.py` | kernel-log watcher that logs amdgpu resets + desktop notification |
+| `experiments/feature-probe.py` | experimental report-7 (256B Win8 PTP blob) reader/writer with snapshot/restore (dangerous) |
+| `experiments/blob-sweep.py` | experimental report-7 byte sweeper with snapshot/restore (dangerous, not run) |
+| `packaging/build-appimage.sh` | AppImage build script (local + CI) |
+| `packaging/icon-*.png` | app icons |
 | `extensions/z13-touchpad-quick@user` | GNOME Quick Settings haptic toggle extension |
 | `extensions/install.sh` | extension installer (idempotent, writes the enabled list) |
 | `docs/` | permission notes + hardware findings |
-| `tests/test_gui_e2e.py` | driver-level e2e tests (28 cases, needs DISPLAY: `GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |
+| `tests/test_gui_e2e.py` | driver-level e2e tests (29 cases, needs DISPLAY: `GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |
 
 ## License
 

@@ -29,8 +29,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import GLib  # noqa: E402
 
-import gui  # noqa: E402
-import haptic  # noqa: E402
+from z13_tools.gui import app as gui  # noqa: E402
+from z13_tools import haptic  # noqa: E402
 
 ADDR_TO_KEY = {reg.addr: key for key, reg in haptic.REGISTERS_BY_KEY.items()}
 

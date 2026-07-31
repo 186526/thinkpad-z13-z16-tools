@@ -39,17 +39,19 @@ try:  # noqa: E402
 except ImportError:  # pragma: no cover
     cairo = None
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import haptic  # noqa: E402
-from haptic import TouchpadError  # noqa: E402
-import brightness  # noqa: E402
+# 仓库根加入 sys.path（本文件位于 z13_tools/gui/，上两级），
+# 支持 `python3 -m z13_tools.gui.app` 与直接运行两种方式。
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+from z13_tools import brightness, haptic  # noqa: E402
+from z13_tools.haptic import TouchpadError  # noqa: E402
 
 # 非 GTK 支撑逻辑（常量 / 配置 / 自启动 / 配套工具）与自绘触控板组件
 # 拆分为独立模块；这里 re-export 全部公共名字，保持 tests/test_gui_e2e.py
 # 对 gui 模块级名字的 monkeypatch 兼容。
-import gui_utils  # noqa: E402
-from gui_utils import *  # noqa: E402,F403
-from touchpad_map import TouchpadMap  # noqa: E402
+from z13_tools.gui import utils as gui_utils  # noqa: E402
+from z13_tools.gui.utils import *  # noqa: E402,F403
+from z13_tools.gui.touchpad_map import TouchpadMap  # noqa: E402
 
 
 def load_config():

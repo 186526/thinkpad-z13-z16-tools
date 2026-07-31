@@ -21,21 +21,23 @@ ThinkPad Z13/Z16 Gen 2 综合性工具(触控板 + 亮度 + 相机 + 监控等)�
 
 | 文件 | 用途 |
 |---|---|
-| `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
-| `gui.py` | GTK4/libadwaita GUI 入口:MainWindow / App / 页面装配,re-export `gui_utils` 与 `touchpad_map`(异步写入队列 + 进度条) |
-| `gui_utils.py` | GUI 的非 GTK 支撑逻辑:常量、配置读写、systemd 自启动、配套工具、feature 格式化(仅标准库 + haptic,从 `gui.py` 拆出) |
-| `touchpad_map.py` | 可视化触控板自绘组件(`TouchpadMap`,GTK + pycairo,从 `gui.py` 拆出) |
-| `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
-| `z13-touchpad-tool` | GUI 启动脚本(bash) |
-| `feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
-| `resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑 `z13-touchpad-apply` 并恢复亮度 |
-| `brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
-| `z13-brightness-apply` | 亮度 CLI(`--get` / `--set` / `--to-windows` / `--to-linux`) |
-| `z13-camera-tool` | IR/RGB 相机检测 + 应用级切换引导 |
-| `gpu-reset-watch.py` | 内核日志监听,记录 amdgpu reset |
-| `hw-probe.py` | 指纹 / TPM / 摄像头探测,写 `docs/hardware-findings.md` |
-| `blob-sweep.py` | 实验性 report-7 逐字节扫描器,带快照/还原(危险,未运行) |
-| `extensions/` | GNOME 快速设置触感开关扩展(`z13-touchpad-quick@user`) |
+| `z13_tools/haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
+| `z13_tools/brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
+| `z13_tools/gui/app.py` | GTK4/libadwaita GUI 入口:MainWindow / App / 页面装配,re-export `utils` 与 `touchpad_map`(异步写入队列 + 进度条) |
+| `z13_tools/gui/utils.py` | GUI 的非 GTK 支撑逻辑:常量、配置读写、systemd 自启动、配套工具、feature 格式化(仅标准库 + haptic) |
+| `z13_tools/gui/touchpad_map.py` | 可视化触控板自绘组件(`TouchpadMap`,GTK + pycairo) |
+| `bin/z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
+| `bin/z13-touchpad-tool` | GUI 启动脚本(bash) |
+| `bin/z13-brightness-apply` | 亮度 CLI(`--get` / `--set` / `--to-windows` / `--to-linux`) |
+| `bin/z13-camera-tool` | IR/RGB 相机检测 + 应用级切换引导 |
+| `bin/z13-hw-probe` | 指纹 / TPM / 摄像头探测,写 `docs/hardware-findings.md` |
+| `monitors/resume-watch.py` | D-Bus `PrepareForSleep` 监听,唤醒后重跑 `bin/z13-touchpad-apply` 并恢复亮度 |
+| `monitors/gpu-reset-watch.py` | 内核日志监听,记录 amdgpu reset |
+| `experiments/feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
+| `experiments/blob-sweep.py` | 实验性 report-7 逐字节扫描器,带快照/还原(危险,未运行) |
+| `packaging/build-appimage.sh` | AppImage 构建脚本(本地与 CI 共用) |
+| `packaging/icon-*.png` | 应用图标 |
+| `extensions/` | GNOME 快速设置触感开关扩展(`z13-touchpad-quick@user`)+ 安装脚本 |
 | `docs/` | 权限说明(`brightness-permissions.md`)+ 硬件探测结果 |
 | `README.md` / `README.zh.md` | 文档,中英两份需保持同步 |
 
@@ -53,7 +55,7 @@ ThinkPad Z13/Z16 Gen 2 综合性工具(触控板 + 亮度 + 相机 + 监控等)�
      `5`=写成功。力度寄存器原始值 = **克数 ÷ 2**。
 - 实测事实(本机验证):feature 11 与寄存器 `0x00AB` 由固件**双向同步**。
 
-### 寄存器表(haptic.py `REGISTERS`)
+### 寄存器表(z13_tools/haptic.py `REGISTERS`)
 
 | 地址 | key | 含义 | 默认 |
 |---|---|---|---|
@@ -71,18 +73,18 @@ feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
 ## 配置与 systemd 服务
 
 - 配置:`~/.config/z13-g2-tools/config.json`(键与 `REGISTERS_BY_KEY` 对齐)
-- 用户服务(由 `gui.set_autostart()` 安装/移除,模板在 `gui.py`):
+- 用户服务(由 `gui.set_autostart()` 安装/移除,模板在 `z13_tools/gui/utils.py`):
   - `z13-touchpad-haptic.service` —— oneshot,登录时应用配置
-  - `z13-touchpad-resume.service` —— 常驻 `resume-watch.py`,唤醒后应用
+  - `z13-touchpad-resume.service` —— 常驻 `monitors/resume-watch.py`,唤醒后应用
 - CLI 默认无参数 = 应用已保存配置;`PERSISTED` 元组决定应用哪些键。
 
 ## 约定
 
-- `haptic.py` 与 CLI **仅用 Python 3 标准库**;GUI 用 PyGObject
+- `z13_tools/haptic.py` 与 CLI **仅用 Python 3 标准库**;GUI 用 PyGObject
   (GTK4 + libadwaita)。
 - UI 文案为**中文**(项目语言);代码注释中英皆可,新代码保持现状风格。
 - CLI 输出人类可读的中文消息;错误走 stderr。
-- 新配置键必须同时加入 `z13-touchpad-apply` 的 `PERSISTED`(如需登录时恢复)。
+- 新配置键必须同时加入 `bin/z13-touchpad-apply` 的 `PERSISTED`(如需登录时恢复)。
 - 设备写入全是内存态、可逆,但**写设备状态前仍须向用户确认**,除非任务
   已明确授权;实验类写入必须"改前快照、测后恢复"。
 - 不要运行 `git commit` / `push` / 其它 git 变更,除非用户明确要求。
@@ -91,28 +93,33 @@ feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
 ## 无头验证(agent 主要手段)
 
 ```bash
-python3 -m py_compile haptic.py gui.py gui_utils.py touchpad_map.py \
-    resume-watch.py feature-probe.py \
-    brightness.py gpu-reset-watch.py hw-probe.py blob-sweep.py
-./z13-touchpad-apply --get          # 触感强度
-./z13-touchpad-apply --show         # 全部寄存器
-./z13-touchpad-apply --list-devices # 全部 hidraw 设备
-./z13-touchpad-apply --watch-test   # 唤醒监听器自检
-./feature-probe.py --dump           # 全部 feature 报告
-python3 -m brightness               # 亮度换算单元测试
-python3 -c "import haptic; print(haptic.find_device())"
-GDK_BACKEND=x11 python3 tests/test_gui_e2e.py  # GUI 驱动级 e2e(28 用例,需 DISPLAY)
+python3 -m py_compile z13_tools/__init__.py z13_tools/haptic.py \
+    z13_tools/brightness.py z13_tools/gui/__init__.py \
+    z13_tools/gui/app.py z13_tools/gui/utils.py z13_tools/gui/touchpad_map.py \
+    bin/z13-touchpad-apply bin/z13-brightness-apply bin/z13-camera-tool \
+    bin/z13-hw-probe monitors/resume-watch.py monitors/gpu-reset-watch.py \
+    experiments/feature-probe.py experiments/blob-sweep.py \
+    tests/test_gui_e2e.py
+./bin/z13-touchpad-apply --get          # 触感强度
+./bin/z13-touchpad-apply --show         # 全部寄存器
+./bin/z13-touchpad-apply --list-devices # 全部 hidraw 设备
+./bin/z13-touchpad-apply --watch-test   # 唤醒监听器自检
+./experiments/feature-probe.py --dump   # 全部 feature 报告
+python3 -m z13_tools.brightness         # 亮度换算单元测试
+python3 -c "from z13_tools import haptic; print(haptic.find_device())"
+GDK_BACKEND=x11 python3 tests/test_gui_e2e.py  # GUI 驱动级 e2e(29 用例,需 DISPLAY)
 systemctl --user status z13-touchpad-haptic.service z13-touchpad-resume.service
 ```
 
-- GUI / GNOME 扩展无法无头验证:用单元级调用代替(如 `import gui` 后
-  monkeypatch `gui.CONFIG_FILE` 到临时路径测 `save_config`),涉及界面交互
-  的部分交付后留给用户实测。
+- GUI / GNOME 扩展无法无头验证:用单元级调用代替(如
+  `from z13_tools.gui import app as gui` 后 monkeypatch `gui.CONFIG_FILE` 到
+  临时路径测 `save_config`),涉及界面交互的部分交付后留给用户实测。
 - 设备状态改动后必须回读确认,实验后恢复原值。
 
 ## 安全红线
 
-- **不要**绕过 `feature-probe.py` 直接写 report 7(256B blob)或未知寄存器;
+- **不要**绕过 `experiments/feature-probe.py` 直接写 report 7(256B blob)
+  或未知寄存器;
   该工具写前自动存快照,可用 `--restore` 还原(重启也能重置)。
 - 实验"触控板禁用"类开关(报告 6)前先和用户确认——可能把触控板锁死
   直到重启,务必预留恢复手段。

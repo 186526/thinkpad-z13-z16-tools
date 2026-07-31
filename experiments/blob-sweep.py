@@ -24,8 +24,15 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import haptic  # noqa: E402
+# 仓库根 = 向上找含 z13_tools 包的祖先目录（源码树与 AppImage 通用）。
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isdir(os.path.join(_REPO_ROOT, "z13_tools")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        break
+    _REPO_ROOT = _parent
+sys.path.insert(0, _REPO_ROOT)
+from z13_tools import haptic  # noqa: E402
 
 HIDIOCSFEATURE = 0xC0084806
 SNAPSHOT_FILE = "/tmp/z13_blob_sweep_snapshot.bin"
