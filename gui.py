@@ -314,9 +314,11 @@ class MainWindow(Adw.ApplicationWindow):
         auto_group.add(self.autostart_switch)
         page.add(auto_group)
 
-        companion_group = Adw.PreferencesGroup(
-            title="配套工具",
-            description="GNOME 快速设置开关、OLED 亮度等配套功能的一键入口。")
+        # ---------------- 配套工具：按操作类型分三组 ----------------
+        # 开关与调节：日常控制类，放最前
+        control_group = Adw.PreferencesGroup(
+            title="开关与调节",
+            description="GNOME 快速设置开关与 OLED 亮度。")
         # GNOME 扩展：未安装 -> 安装；已安装 -> 卸载
         self.ext_row = Adw.ActionRow(title="GNOME 快速设置开关",
                                      subtitle="未检测")
@@ -324,7 +326,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.ext_button.add_css_class("suggested-action")
         self.ext_button.connect("clicked", self._on_ext_toggle)
         self.ext_row.add_suffix(self.ext_button)
-        companion_group.add(self.ext_row)
+        control_group.add(self.ext_row)
 
         # OLED 亮度
         self.brightness_row = Adw.ActionRow(title="OLED 亮度",
@@ -340,20 +342,20 @@ class MainWindow(Adw.ApplicationWindow):
         brightness_box.set_margin_top(4)
         brightness_box.set_margin_bottom(4)
         brightness_box.append(self.brightness_scale)
-        companion_group.add(self.brightness_row)
-        companion_group.add(brightness_box)
+        control_group.add(self.brightness_row)
+        control_group.add(brightness_box)
+        page.add(control_group)
 
+        # 检测与维护：按需运行的一次性工具
+        tools_group = Adw.PreferencesGroup(
+            title="检测与维护",
+            description="相机检测与硬件探测。")
         # 相机检测
         self.camera_row = Adw.ActionRow(title="相机检测", subtitle="未检测")
-        self.camera_button = Gtk.Button(label="重新检测")
+        self.camera_button = Gtk.Button(label="检测")
         self.camera_button.connect("clicked", self._on_camera_probe)
         self.camera_row.add_suffix(self.camera_button)
-        companion_group.add(self.camera_row)
-
-        # GPU reset 监控（常驻监听由 systemd 用户服务运行，这里只读展示）
-        self.gpu_row = Adw.ActionRow(title="GPU 重置监控",
-                                     subtitle="无重置记录")
-        companion_group.add(self.gpu_row)
+        tools_group.add(self.camera_row)
 
         # 硬件探测
         self.probe_row = Adw.ActionRow(title="硬件探测",
@@ -361,8 +363,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.probe_button = Gtk.Button(label="运行")
         self.probe_button.connect("clicked", self._on_hw_probe)
         self.probe_row.add_suffix(self.probe_button)
-        companion_group.add(self.probe_row)
-        page.add(companion_group)
+        tools_group.add(self.probe_row)
+        page.add(tools_group)
+
+        # 状态与记录：只读诊断展示，不伪装成可配置项
+        status_group = Adw.PreferencesGroup(
+            title="状态与记录",
+            description="GPU 重置监控（只读，常驻监听由 systemd 服务运行）。")
+        self.gpu_row = Adw.ActionRow(title="GPU 重置监控",
+                                     subtitle="无重置记录")
+        status_group.add(self.gpu_row)
+        page.add(status_group)
 
         reset_group = Adw.PreferencesGroup(
             description="把所有力度与触感设置恢复为出厂默认"
@@ -953,6 +964,8 @@ class MainWindow(Adw.ApplicationWindow):
         text = probe_cameras()
         self.camera_row.set_subtitle(text or "检测失败")
         if text:
+            # 已有结果后按钮文案变为「重新检测」，语义更准确
+            self.camera_button.set_label("重新检测")
             self._show_toast(f"相机: {text}")
 
     def _on_hw_probe(self, _btn):
