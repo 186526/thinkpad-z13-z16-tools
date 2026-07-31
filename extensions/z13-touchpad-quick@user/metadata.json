@@ -1,0 +1,17 @@
+{
+    "uuid": "z13-touchpad-quick@user",
+    "name": "Z13 触控板触感开关",
+    "description": "在 GNOME 快速设置里开关 ThinkPad Z13/Z16 Gen 2 触觉触控板的触感强度(调 z13-touchpad-apply --set-haptic 0/100,状态用 --get 回读)。",
+    "version": 1,
+    "shell-version": [
+        "45",
+        "46",
+        "47",
+        "48",
+        "49",
+        "50"
+    ],
+    "session-modes": [
+        "user"
+    ]
+}
