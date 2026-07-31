@@ -22,7 +22,9 @@ ThinkPad Z13/Z16 Gen 2 综合性工具(触控板 + 亮度 + 相机 + 监控等)�
 | 文件 | 用途 |
 |---|---|
 | `haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
-| `gui.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 配套工具 + 设备页 + HID 查看器;异步写入队列 + 进度条) |
+| `gui.py` | GTK4/libadwaita GUI 入口:MainWindow / App / 页面装配,re-export `gui_utils` 与 `touchpad_map`(异步写入队列 + 进度条) |
+| `gui_utils.py` | GUI 的非 GTK 支撑逻辑:常量、配置读写、systemd 自启动、配套工具、feature 格式化(仅标准库 + haptic,从 `gui.py` 拆出) |
+| `touchpad_map.py` | 可视化触控板自绘组件(`TouchpadMap`,GTK + pycairo,从 `gui.py` 拆出) |
 | `z13-touchpad-apply` | CLI:应用配置 / `--get` / `--set` / `--show` / `--set-click-*` / `--set-haptic` / `--set-zone` / `--profile` / `--reg` / `--list-devices` / `--watch-test` |
 | `z13-touchpad-tool` | GUI 启动脚本(bash) |
 | `feature-probe.py` | 实验性 report-7(256B Win8 PTP blob)读写器,带快照/还原 |
@@ -89,7 +91,8 @@ feature 报告:3, 4, 6(Surface/Button Switch 各 1 bit), 7(256B blob),
 ## 无头验证(agent 主要手段)
 
 ```bash
-python3 -m py_compile haptic.py gui.py resume-watch.py feature-probe.py \
+python3 -m py_compile haptic.py gui.py gui_utils.py touchpad_map.py \
+    resume-watch.py feature-probe.py \
     brightness.py gpu-reset-watch.py hw-probe.py blob-sweep.py
 ./z13-touchpad-apply --get          # 触感强度
 ./z13-touchpad-apply --show         # 全部寄存器
