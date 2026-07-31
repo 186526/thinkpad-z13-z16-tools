@@ -8,6 +8,8 @@ on:
 jobs:
   appimage:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # 创建/更新 release 需要
     steps:
       - name: Checkout
         uses: actions/checkout@v4
