@@ -155,7 +155,7 @@ class TouchpadMap(Gtk.DrawingArea):
         if cairo is not None:
             pat = cairo.LinearGradient(0, 0, 0, h)
             pat.add_color_stop_rgba(0, 1, 1, 1, 0.07)
-            pat.add_color_stop_rgba(1, 1, 1, 0.015)
+            pat.add_color_stop_rgba(1, 1, 1, 1, 0.015)
             cr.set_source(pat)
         else:
             cr.set_source_rgba(1, 1, 1, 0.04)
