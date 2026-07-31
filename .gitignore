@@ -6,3 +6,6 @@ venv/
 dist/
 build/
 *.egg-info/
+
+# 运行时状态
+.sisyphus/
