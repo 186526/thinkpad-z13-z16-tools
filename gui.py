@@ -164,9 +164,32 @@ class MainWindow(Adw.ApplicationWindow):
         dev_group.add(self.device_row)
         page.add(dev_group)
 
-        click_group = Adw.PreferencesGroup(
-            title="点击力度",
-            description="调低后轻按即可点击；调高后需要更用力。")
+        force_group = Adw.PreferencesGroup(
+            title="按压力度",
+            description="整板主点击区与上沿三个按键的按压力度。"
+                        "调低后轻按即可点击；调高后需要更用力。")
+
+        def _section_label(text):
+            """组内小节标题（libadwaita 标题字号，左对齐）。"""
+            lbl = Gtk.Label(label=text)
+            lbl.add_css_class("title-4")
+            lbl.set_xalign(0.0)
+            lbl.set_margin_top(16)
+            lbl.set_margin_bottom(4)
+            lbl.set_margin_start(6)
+            return lbl
+
+        # ---- 主点击区（整板，0x0038 / 0x0090）----
+        force_group.add(_section_label("主点击区"))
+
+        self.profile_row = Adw.ComboRow(
+            title="预设档位",
+            subtitle="快速选择适合的按压力度，选择后立即应用")
+        self.profile_model = Gtk.StringList.new(["轻触", "标准", "重按"])
+        self.profile_row.set_model(self.profile_model)
+        self.profile_row.connect("notify::selected", self._on_profile_selected)
+        force_group.add(self.profile_row)
+
         self.click_label = Gtk.Label(label="点击 164g", width_chars=10, xalign=1.0)
         self.click_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
                                                     10, 500, 1)
@@ -179,6 +202,7 @@ class MainWindow(Adw.ApplicationWindow):
         click_box.set_margin_bottom(4)
         click_box.append(self.click_label)
         click_box.append(self.click_scale)
+        force_group.add(click_box)
 
         self.release_label = Gtk.Label(label="释放 108g", width_chars=10, xalign=1.0)
         self.release_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
@@ -192,30 +216,18 @@ class MainWindow(Adw.ApplicationWindow):
         release_box.set_margin_bottom(4)
         release_box.append(self.release_label)
         release_box.append(self.release_scale)
+        force_group.add(release_box)
 
         self.link_switch = Adw.SwitchRow(
             title="释放力度自动跟随",
             subtitle="保持点击和松开时的力度比例自然（推荐）")
         self.link_switch.set_active(True)
         self.link_switch.connect("notify::active", self._on_link_toggled)
+        force_group.add(self.link_switch)
 
-        self.profile_row = Adw.ComboRow(
-            title="预设档位",
-            subtitle="快速选择适合的按压力度，选择后立即应用")
-        self.profile_model = Gtk.StringList.new(["轻触", "标准", "重按"])
-        self.profile_row.set_model(self.profile_model)
-        self.profile_row.connect("notify::selected", self._on_profile_selected)
+        # ---- 顶部按键（上沿三键，0x0091-0x0096）----
+        force_group.add(_section_label("顶部按键"))
 
-        click_group.add(self.profile_row)
-        click_group.add(click_box)
-        click_group.add(release_box)
-        click_group.add(self.link_switch)
-        page.add(click_group)
-
-        zone_group = Adw.PreferencesGroup(
-            title="顶部按键力度",
-            description="分别调整触控板上沿左、中、右三个按键的力度。"
-                        "点击图中的按键即可选择。")
         self.zone_values = {}   # key -> 克数
         for _ztitle, click_key, release_key in ZONE_MAP:
             self.zone_values[click_key] = 0
@@ -231,7 +243,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.zone_profile_row.set_model(self.zone_profile_model)
         self.zone_profile_row.connect("notify::selected",
                                       self._on_zone_profile_selected)
-        zone_group.add(self.zone_profile_row)
+        force_group.add(self.zone_profile_row)
 
         touchpad_wrap = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         touchpad_wrap.set_halign(Gtk.Align.CENTER)
@@ -239,7 +251,7 @@ class MainWindow(Adw.ApplicationWindow):
         touchpad_wrap.set_margin_bottom(8)
         self.touchpad_map = TouchpadMap(on_select=self._on_zone_pick)
         touchpad_wrap.append(self.touchpad_map)
-        zone_group.add(touchpad_wrap)
+        force_group.add(touchpad_wrap)
 
         self.zone_combo = Adw.ComboRow(
             title="要调整的按键",
@@ -249,7 +261,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.zone_combo.set_model(self.zone_combo_model)
         self.zone_combo.set_selected(0)
         self.zone_combo.connect("notify::selected", self._on_zone_combo_changed)
-        zone_group.add(self.zone_combo)
+        force_group.add(self.zone_combo)
 
         self.zone_click_label = Gtk.Label(label="点击 —", width_chars=10, xalign=1.0)
         self.zone_click_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
@@ -263,7 +275,7 @@ class MainWindow(Adw.ApplicationWindow):
         zone_click_box.set_margin_bottom(4)
         zone_click_box.append(self.zone_click_label)
         zone_click_box.append(self.zone_click_scale)
-        zone_group.add(zone_click_box)
+        force_group.add(zone_click_box)
 
         self.zone_release_label = Gtk.Label(label="释放 —", width_chars=10, xalign=1.0)
         self.zone_release_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
@@ -277,8 +289,8 @@ class MainWindow(Adw.ApplicationWindow):
         zone_release_box.set_margin_bottom(4)
         zone_release_box.append(self.zone_release_label)
         zone_release_box.append(self.zone_release_scale)
-        zone_group.add(zone_release_box)
-        page.add(zone_group)
+        force_group.add(zone_release_box)
+        page.add(force_group)
 
         haptic_group = Adw.PreferencesGroup(
             title="触感强度",
