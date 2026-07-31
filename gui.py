@@ -169,28 +169,46 @@ class MainWindow(Adw.ApplicationWindow):
             description="整板主点击区与上沿三个按键的按压力度。"
                         "调低后轻按即可点击；调高后需要更用力。")
 
-        def _section_label(text):
-            """组内小节标题（libadwaita 标题字号，左对齐）。"""
-            lbl = Gtk.Label(label=text)
-            lbl.add_css_class("title-4")
-            lbl.set_xalign(0.0)
-            lbl.set_margin_top(16)
-            lbl.set_margin_bottom(4)
-            lbl.set_margin_start(6)
-            return lbl
+        # 触控板图：左/中/右三键 + 主点击区四个区域均可点击选中
+        touchpad_wrap = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        touchpad_wrap.set_halign(Gtk.Align.CENTER)
+        touchpad_wrap.set_margin_top(12)
+        touchpad_wrap.set_margin_bottom(8)
+        self.touchpad_map = TouchpadMap(on_select=self._on_zone_pick)
+        touchpad_wrap.append(self.touchpad_map)
+        force_group.add(touchpad_wrap)
 
-        # ---- 主点击区（整板，0x0038 / 0x0090）----
-        force_group.add(_section_label("主点击区"))
+        # 全部区域的力度模型（克数）：click_force/click_release 主点击区
+        # + 六个三键键；滑块/预设都是「当前选中区域」的编辑器
+        self.zone_values = {}   # key -> 克数
+        for key in ("click_force", "click_release"):
+            self.zone_values[key] = 0
+        for _ztitle, click_key, release_key in ZONE_MAP:
+            self.zone_values[click_key] = 0
+            self.zone_values[release_key] = 0
+        self.selected_zone = 0
 
+        self.zone_combo = Adw.ComboRow(
+            title="要调整的区域",
+            subtitle="点击上方图形或在此选择要调节的区域")
+        self.zone_combo_model = Gtk.StringList.new(
+            [ztitle for ztitle, _ck, _rk in ZONE_MAP] + ["主点击区"])
+        self.zone_combo.set_model(self.zone_combo_model)
+        self.zone_combo.set_selected(0)
+        self.zone_combo.connect("notify::selected", self._on_zone_combo_changed)
+        force_group.add(self.zone_combo)
+
+        # 预设档位：按当前选中区域应用——主点击区用整板预设，
+        # 三个按键统一用按键预设（左/中/右同一力度）
         self.profile_row = Adw.ComboRow(
             title="预设档位",
-            subtitle="快速选择适合的按压力度，选择后立即应用")
+            subtitle="按当前选中的区域应用默认力度")
         self.profile_model = Gtk.StringList.new(["轻触", "标准", "重按"])
         self.profile_row.set_model(self.profile_model)
         self.profile_row.connect("notify::selected", self._on_profile_selected)
         force_group.add(self.profile_row)
 
-        self.click_label = Gtk.Label(label="点击 164g", width_chars=10, xalign=1.0)
+        self.click_label = Gtk.Label(label="点击 —", width_chars=10, xalign=1.0)
         self.click_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
                                                     10, 500, 1)
         self.click_scale.set_hexpand(True)
@@ -204,7 +222,7 @@ class MainWindow(Adw.ApplicationWindow):
         click_box.append(self.click_scale)
         force_group.add(click_box)
 
-        self.release_label = Gtk.Label(label="释放 108g", width_chars=10, xalign=1.0)
+        self.release_label = Gtk.Label(label="释放 —", width_chars=10, xalign=1.0)
         self.release_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
                                                       10, 500, 1)
         self.release_scale.set_hexpand(True)
@@ -224,72 +242,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_switch.set_active(True)
         self.link_switch.connect("notify::active", self._on_link_toggled)
         force_group.add(self.link_switch)
-
-        # ---- 顶部按键（上沿三键，0x0091-0x0096）----
-        force_group.add(_section_label("顶部按键"))
-
-        self.zone_values = {}   # key -> 克数
-        for _ztitle, click_key, release_key in ZONE_MAP:
-            self.zone_values[click_key] = 0
-            self.zone_values[release_key] = 0
-        self.selected_zone = 0
-
-        # 一键套用三键预设力度
-        self.zone_profile_row = Adw.ComboRow(
-            title="按键预设",
-            subtitle="一键设置左、中、右三个按键的按压力度")
-        self.zone_profile_model = Gtk.StringList.new(
-            [ZONE_PRESET_LABELS[n] for n in ZONE_PRESETS])
-        self.zone_profile_row.set_model(self.zone_profile_model)
-        self.zone_profile_row.connect("notify::selected",
-                                      self._on_zone_profile_selected)
-        force_group.add(self.zone_profile_row)
-
-        touchpad_wrap = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        touchpad_wrap.set_halign(Gtk.Align.CENTER)
-        touchpad_wrap.set_margin_top(12)
-        touchpad_wrap.set_margin_bottom(8)
-        self.touchpad_map = TouchpadMap(on_select=self._on_zone_pick)
-        touchpad_wrap.append(self.touchpad_map)
-        force_group.add(touchpad_wrap)
-
-        self.zone_combo = Adw.ComboRow(
-            title="要调整的按键",
-            subtitle="点击上方图形或在此选择要调节的按键")
-        self.zone_combo_model = Gtk.StringList.new(
-            [ztitle for ztitle, _ck, _rk in ZONE_MAP])
-        self.zone_combo.set_model(self.zone_combo_model)
-        self.zone_combo.set_selected(0)
-        self.zone_combo.connect("notify::selected", self._on_zone_combo_changed)
-        force_group.add(self.zone_combo)
-
-        self.zone_click_label = Gtk.Label(label="点击 —", width_chars=10, xalign=1.0)
-        self.zone_click_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
-                                                         10, 500, 1)
-        self.zone_click_scale.set_hexpand(True)
-        self.zone_click_scale.set_draw_value(False)
-        self.zone_click_scale.connect("value-changed", self._on_zone_changed)
-        zone_click_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        zone_click_box.add_css_class("card")
-        zone_click_box.set_margin_top(4)
-        zone_click_box.set_margin_bottom(4)
-        zone_click_box.append(self.zone_click_label)
-        zone_click_box.append(self.zone_click_scale)
-        force_group.add(zone_click_box)
-
-        self.zone_release_label = Gtk.Label(label="释放 —", width_chars=10, xalign=1.0)
-        self.zone_release_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
-                                                           10, 500, 1)
-        self.zone_release_scale.set_hexpand(True)
-        self.zone_release_scale.set_draw_value(False)
-        self.zone_release_scale.connect("value-changed", self._on_zone_changed)
-        zone_release_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        zone_release_box.add_css_class("card")
-        zone_release_box.set_margin_top(4)
-        zone_release_box.set_margin_bottom(4)
-        zone_release_box.append(self.zone_release_label)
-        zone_release_box.append(self.zone_release_scale)
-        force_group.add(zone_release_box)
         page.add(force_group)
 
         haptic_group = Adw.PreferencesGroup(
@@ -501,26 +453,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_companion()
             return
 
-        click = regs.get("click_force")
-        if click is not None:
-            self.click_scale.set_value(click * 2)
-            self.click_label.set_text(f"点击 {click * 2}g")
-            self.touchpad_map.set_main_force(click * 2)
-            # 选中与当前点击力度最接近的预设档（回填，不触发应用）
-            names = list(haptic.PROFILES)
-            best = min(names, key=lambda n: abs(
-                haptic.PROFILES[n]["click_force"] - click * 2))
-            self.profile_row.set_selected(names.index(best))
-        release = regs.get("click_release")
-        if release is not None:
-            self.release_scale.set_value(release * 2)
-            self.release_label.set_text(f"释放 {release * 2}g")
-
         for key in self.zone_values:
             raw = regs.get(key)
             if raw is not None:
                 self.zone_values[key] = raw * 2
-        # 统一入口：同时刷新 combo/高亮/滑块/图上数值，修复选中态分歧
+        # 统一入口：同时刷新 combo/高亮/滑块/预设行/图上数值，修复选中态分歧
         self._set_selected_zone(self.selected_zone)
 
         snapped = int(round(self.current / INTENSITY_STEP) * INTENSITY_STEP)
@@ -533,9 +470,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _set_controls_enabled(self, enabled):
         for w in (self.scale, self.reset_button, self.autostart_switch,
                   self.click_scale, self.release_scale, self.link_switch,
-                  self.profile_row, self.zone_profile_row,
-                  self.zone_click_scale, self.zone_release_scale,
-                  self.zone_combo, self.touchpad_map,
+                  self.profile_row, self.zone_combo, self.touchpad_map,
                   self.reset_all_button):
             w.set_sensitive(enabled)
 
@@ -622,8 +557,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.click_label.set_text(f"点击 {grams}g")
         if self._initializing or self.device is None or self._syncing:
             return
+        ck, _rk = self._zone_keys_for_selected()
+        self.zone_values[ck] = grams
         if self.link_switch.get_active():
             self._sync_release_from_click()
+        self._push_to_map()
         self._schedule_apply()
 
     def _on_release_changed(self, scale):
@@ -632,83 +570,98 @@ class MainWindow(Adw.ApplicationWindow):
         if self._initializing or self.device is None or self._syncing:
             return
         if not self.link_switch.get_active():
+            _ck, rk = self._zone_keys_for_selected()
+            self.zone_values[rk] = grams
+            self._push_to_map()
             self._schedule_apply()
 
     def _on_profile_selected(self, row, _pspec):
-        if self._initializing or self.device is None:
+        """预设档位：按当前选中区域应用——主点击区用整板预设，
+        顶部三键统一用按键预设（左/中/右同一力度）。"""
+        if self._initializing or self._syncing or self.device is None:
             return
         idx = row.get_selected()
         names = list(haptic.PROFILES)
         if not 0 <= idx < len(names):
             return
         name = names[idx]
-        try:
-            raw_vals = {}
-            for key, grams in haptic.PROFILES[name].items():
-                reg = haptic.REGISTERS_BY_KEY[key]
-                raw_vals[key] = reg.from_human(grams)
-                haptic.write_register(self.device, reg.addr, raw_vals[key])
-        except haptic.RegisterError as e:
-            self._show_toast(str(e), is_error=True)
-            return
-        # 同步滑块到设备真实值并保存（与 _apply_all 相同的 raw*2 显示）
-        self._syncing = True
-        self.click_scale.set_value(raw_vals["click_force"] * 2)
-        self.click_label.set_text(f"点击 {raw_vals['click_force'] * 2}g")
-        self.release_scale.set_value(raw_vals["click_release"] * 2)
-        self.release_label.set_text(f"释放 {raw_vals['click_release'] * 2}g")
-        self.touchpad_map.set_main_force(raw_vals["click_force"] * 2)
-        self._syncing = False
-        save_config(**{key: raw_vals[key] * 2 for key in raw_vals})
-        label = PROFILE_LABELS.get(name, name)
-        self._show_toast(f"已应用预设「{label}」: 点击 {raw_vals['click_force'] * 2}g · "
-                         f"释放 {raw_vals['click_release'] * 2}g")
-
-    def _on_zone_changed(self, scale):
-        # 程序化回填（_syncing）时不改写模型，避免回调环与误写
-        if self._syncing:
-            return
-        grams = int(round(scale.get_value()))
-        click_key, release_key = self._zone_keys_for_selected()
-        if scale is self.zone_click_scale:
-            self.zone_values[click_key] = grams
-            self.zone_click_label.set_text(f"点击 {grams}g")
+        if self.selected_zone == 3:
+            targets = list(haptic.PROFILES[name].items())
+            area = "主点击区"
         else:
-            self.zone_values[release_key] = grams
-            self.zone_release_label.set_text(f"释放 {grams}g")
-        self._refresh_zone_map()
-        if self._initializing or self.device is None:
-            return
-        self._schedule_apply()
+            preset = ZONE_PRESETS[name]      # {"click": g, "release": g}
+            targets = []
+            for _ztitle, click_key, release_key in ZONE_MAP:
+                targets.append((click_key, preset["click"]))
+                targets.append((release_key, preset["release"]))
+            area = "顶部按键"
+        raw_vals = {key: haptic.REGISTERS_BY_KEY[key].from_human(grams)
+                    for key, grams in targets}
+
+        def work():
+            for key, raw in raw_vals.items():
+                reg = haptic.REGISTERS_BY_KEY[key]
+                haptic.write_register(self.device, reg.addr, raw)
+
+        def on_ok(_result):
+            # 同步模型/滑块/图/配置（raw*2 显示，与 _apply_all 一致）
+            self._syncing = True
+            for key, raw in raw_vals.items():
+                self.zone_values[key] = raw * 2
+            self._syncing = False
+            self._sync_force_sliders()
+            self._push_to_map()
+            save_config(**{key: raw * 2 for key, raw in raw_vals.items()})
+            label = PROFILE_LABELS.get(name, name)
+            self._show_toast(f"已应用预设「{label}」至{area}")
+
+        self._enqueue_apply(work, on_ok)
 
     def _zone_keys_for_selected(self):
-        """当前选中分区对应的 (点击键, 释放键)。"""
+        """当前选中区域对应的 (点击键, 释放键)；主点击区指向整板寄存器。"""
+        if self.selected_zone == 3:
+            return "click_force", "click_release"
         _ztitle, click_key, release_key = ZONE_MAP[self.selected_zone]
         return click_key, release_key
 
-    def _refresh_zone_map(self):
-        """把 zone_values 推给触控板图重绘（视觉顺序 左/中/右）。"""
+    def _push_to_map(self):
+        """把三键与主点击区数值推给触控板图重绘。"""
         self.touchpad_map.set_values(
             [self.zone_values[ZONE_MAP[i][1]] for i in range(3)],
             [self.zone_values[ZONE_MAP[i][2]] for i in range(3)])
+        self.touchpad_map.set_main_force(self.zone_values.get("click_force", 0))
 
-    def _sync_zone_sliders(self):
-        """按当前选中分区回填两条滑块（_syncing 防抖，不触发应用）。"""
+    def _sync_force_sliders(self):
+        """按当前选中区域回填两条滑块（_syncing 防抖，不触发应用）。"""
         click_key, release_key = self._zone_keys_for_selected()
         self._syncing = True
-        self.zone_click_scale.set_value(self.zone_values[click_key])
-        self.zone_click_label.set_text(f"点击 {self.zone_values[click_key]}g")
-        self.zone_release_scale.set_value(self.zone_values[release_key])
-        self.zone_release_label.set_text(f"释放 {self.zone_values[release_key]}g")
+        self.click_scale.set_value(self.zone_values[click_key])
+        self.click_label.set_text(f"点击 {self.zone_values[click_key]}g")
+        self.release_scale.set_value(self.zone_values[release_key])
+        self.release_label.set_text(f"释放 {self.zone_values[release_key]}g")
+        self._syncing = False
+
+    def _backfill_preset_row(self):
+        """按当前选中区域的点击力度回填预设档位选中值（不触发应用）。"""
+        if self.selected_zone == 3:
+            table, key = haptic.PROFILES, "click_force"
+        else:
+            table, key = ZONE_PRESETS, "click"
+        ck, _rk = self._zone_keys_for_selected()
+        grams = self.zone_values.get(ck, 0)
+        names = list(table)
+        best = min(names, key=lambda n: abs(table[n][key] - grams))
+        self._syncing = True
+        self.profile_row.set_selected(names.index(best))
         self._syncing = False
 
     def _set_selected_zone(self, index):
-        """切换选中分区：统一同步 combo、图上高亮、图上数值与两条滑块。
+        """切换选中区域：统一同步 combo、图上高亮、滑块与预设行。
 
         MainWindow.selected_zone 是唯一选中态数据源，所有路径
         （图上点击 / 下拉选择 / 设备刷新）都从这里同步。
         """
-        if not 0 <= index < len(ZONE_MAP):
+        if not 0 <= index < 4:
             return
         self.selected_zone = index
         self.touchpad_map.set_selected(index)
@@ -717,8 +670,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.zone_combo.set_selected(index)
         finally:
             self.zone_combo.handler_unblock_by_func(self._on_zone_combo_changed)
-        self._sync_zone_sliders()
-        self._refresh_zone_map()
+        self._sync_force_sliders()
+        self._backfill_preset_row()
+        self._push_to_map()
 
     def _on_zone_pick(self, index):
         if self._initializing or self.device is None:
@@ -730,36 +684,6 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._set_selected_zone(row.get_selected())
 
-    def _on_zone_profile_selected(self, row, _pspec):
-        """一键套用顶部三键预设力度（轻触/标准/重按）。"""
-        if self._initializing:
-            return
-        index = row.get_selected()
-        if not 0 <= index < len(ZONE_PRESETS):
-            return
-        name = list(ZONE_PRESETS)[index]
-        preset = ZONE_PRESETS[name]
-        for _ztitle, click_key, release_key in ZONE_MAP:
-            self.zone_values[click_key] = preset["click"]
-            self.zone_values[release_key] = preset["release"]
-        self._sync_zone_sliders()
-        self._refresh_zone_map()
-        if self.device is None:
-            return
-        raws = {key: haptic.REGISTERS_BY_KEY[key].from_human(grams)
-                for key, grams in self.zone_values.items()}
-
-        def work():
-            for key, raw in raws.items():
-                reg = haptic.REGISTERS_BY_KEY[key]
-                haptic.write_register(self.device, reg.addr, raw)
-
-        def on_ok(_result):
-            save_config(**{key: raw * 2 for key, raw in raws.items()})
-            self._show_toast(f"已应用按键预设「{ZONE_PRESET_LABELS[name]}」")
-
-        self._enqueue_apply(work, on_ok)
-
     def _on_link_toggled(self, switch, _pspec):
         if self._initializing:
             return
@@ -767,13 +691,15 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_release_from_click()
 
     def _sync_release_from_click(self):
-        """Release raw = 65% of the click raw (grams/2), like the reference tool."""
+        """Release raw = 65% of the click raw (grams/2)，作用于当前选中区域。"""
+        click_key, release_key = self._zone_keys_for_selected()
         click_g = int(round(self.click_scale.get_value()))
-        click_raw = haptic.REGISTERS_BY_KEY["click_force"].from_human(click_g)
+        click_raw = haptic.REGISTERS_BY_KEY[click_key].from_human(click_g)
         rel_raw = max(1, round(click_raw * 0.65))
         self._syncing = True
         self.release_scale.set_value(rel_raw * 2)
         self.release_label.set_text(f"释放 {rel_raw * 2}g")
+        self.zone_values[release_key] = rel_raw * 2
         self._syncing = False
 
     def _schedule_apply(self):
@@ -785,43 +711,37 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_id = None
         if self.device is None:
             return GLib.SOURCE_REMOVE
-        # 主线程收集最新值，换算成 raw
-        click_g = int(round(self.click_scale.get_value()))
-        click_raw = haptic.REGISTERS_BY_KEY["click_force"].from_human(click_g)
+        # 当前滑块值先写回对应区域模型（含 link 联动释放），再全量写设备
+        ck, rk = self._zone_keys_for_selected()
+        self.zone_values[ck] = int(round(self.click_scale.get_value()))
         if self.link_switch.get_active():
+            click_raw = haptic.REGISTERS_BY_KEY[ck].from_human(self.zone_values[ck])
             rel_raw = max(1, round(click_raw * 0.65))
+            self.zone_values[rk] = rel_raw * 2
         else:
-            rel_g = int(round(self.release_scale.get_value()))
-            rel_raw = haptic.REGISTERS_BY_KEY["click_release"].from_human(rel_g)
-        zone_raws = {key: haptic.REGISTERS_BY_KEY[key].from_human(grams)
-                     for key, grams in self.zone_values.items()}
-        values = {"click_force": click_raw, "click_release": rel_raw}
-        values.update(zone_raws)
+            self.zone_values[rk] = int(round(self.release_scale.get_value()))
+        raw_values = {key: haptic.REGISTERS_BY_KEY[key].from_human(grams)
+                      for key, grams in self.zone_values.items()}
 
         def work():
             # 后台线程执行设备 ioctl（含 ACK 等待），避免 UI 卡顿
-            for key, raw in values.items():
+            for key, raw in raw_values.items():
                 reg = haptic.REGISTERS_BY_KEY[key]
                 haptic.write_register(self.device, reg.addr, raw)
 
         def on_ok(_result):
             # 把滑块同步到设备真实值（raw*2），避免 165g -> raw 83 -> 166g 显示偏差
             self._syncing = True
-            self.click_scale.set_value(click_raw * 2)
-            self.click_label.set_text(f"点击 {click_raw * 2}g")
-            self.touchpad_map.set_main_force(click_raw * 2)
-            if self.link_switch.get_active():
-                self.release_scale.set_value(rel_raw * 2)
-                self.release_label.set_text(f"释放 {rel_raw * 2}g")
-            for key, raw in zone_raws.items():
+            for key, raw in raw_values.items():
                 self.zone_values[key] = raw * 2
             self._syncing = False
-            self._sync_zone_sliders()
-            self._refresh_zone_map()
-            cfg = {"click_force": click_raw * 2, "click_release": rel_raw * 2}
-            cfg.update({key: raw * 2 for key, raw in zone_raws.items()})
-            save_config(**cfg)
-            self._show_toast(f"点击力度 {click_raw * 2}g · 释放 {rel_raw * 2}g")
+            self._sync_force_sliders()
+            self._push_to_map()
+            save_config(**self.zone_values)
+            area = ("主点击区" if self.selected_zone == 3
+                    else ZONE_MAP[self.selected_zone][0])
+            self._show_toast(f"{area}: 点击 {self.zone_values[ck]}g · "
+                             f"释放 {self.zone_values[rk]}g")
 
         self._enqueue_apply(work, on_ok)
         return GLib.SOURCE_REMOVE
@@ -899,8 +819,6 @@ class MainWindow(Adw.ApplicationWindow):
             cfg = {"haptic_intensity":
                    int(round(self.current / INTENSITY_STEP) * INTENSITY_STEP)}
             cfg.update(self.zone_values)
-            cfg["click_force"] = int(round(self.click_scale.get_value()))
-            cfg["click_release"] = int(round(self.release_scale.get_value()))
             save_config(**cfg)
             self._show_toast("已恢复出厂设置")
 

@@ -3,7 +3,7 @@
 
 从 gui.py 拆出的独立模块，只依赖 GTK4 / libadwaita / pycairo，
 不持有设备状态：数值与选中态由外部通过 set_values / set_selected /
-set_main_force 驱动；点击条带内按键时回调 on_select(index)。
+set_main_force 驱动；点击区域内按键时回调 on_select(index)。
 """
 
 import math
@@ -29,10 +29,11 @@ class TouchpadMap(Gtk.DrawingArea):
     本机实测确认：0x0091-0x0096 三个 zone 对应触控板上沿一条横向条带里的
     三个虚拟 TrackPoint 按键（左键/中键/右键），而非表面纵向分区。条带高约
     20%，三键按 40:20:40 宽度分配（中键较窄）；条带以下为整板可点击的主
-    点击区（力度 0x0038，仅展示）。分区边界为示意，纯绘制
-    组件不持有设备状态：数值与选中态由外部通过 set_values / set_selected /
-    set_main_force 驱动；点击条带内按键时回调 on_select(index)，由
-    MainWindow 统一同步（_selected 不在图内直接修改）。
+    点击区（力度 0x0038）。四个区域下标：0/1/2 = 左/中/右键，3 = 主点击区，
+    均参与选择与高亮。分区边界为示意，纯绘制组件不持有设备状态：数值与
+    选中态由外部通过 set_values / set_selected / set_main_force 驱动；
+    点击任一区域时回调 on_select(index)，由 MainWindow 统一同步
+    （_selected 不在图内直接修改）。
     """
 
     _STRIP_FRAC = 0.20                 # 顶部条带占板高比例
@@ -70,7 +71,7 @@ class TouchpadMap(Gtk.DrawingArea):
         self.queue_draw()
 
     def set_main_force(self, grams):
-        """主点击区（整板点击力度 0x0038）的克数，仅展示。"""
+        """主点击区（整板点击力度 0x0038）的克数，供图上文字展示。"""
         self._main_force_g = grams
         self.queue_draw()
 
@@ -81,12 +82,12 @@ class TouchpadMap(Gtk.DrawingArea):
     # ---------------- 事件 ----------------
 
     def _zone_at(self, x, y):
-        """返回 (x,y) 命中的键下标，主点击区内返回 -1。"""
+        """返回 (x,y) 命中的区域下标：0/1/2 顶部三键，3 主点击区。"""
         w, h = self.get_width(), self.get_height()
         if w <= 0 or h <= 0:
             return -1
         if y > h * self._STRIP_FRAC:
-            return -1  # 主点击区不参与分区选择
+            return 3  # 主点击区（整板下半）作为第 4 个可选区域
         if x < self._SPLITS[1] * w:
             return 0
         if x < self._SPLITS[2] * w:
@@ -181,6 +182,20 @@ class TouchpadMap(Gtk.DrawingArea):
                 cr.fill()
             cr.restore()
 
+        # 主点击区填充（选中 accent 淡色 / 悬停白色，贴底板圆角）
+        if self._selected == 3 or self._hovered == 3:
+            cr.save()
+            self._rounded_rect(cr, 0, 0, w, h, radius)
+            cr.clip()
+            self._rounded_rect4(cr, 1, strip_h, w - 2, h - strip_h,
+                                6.0, 6.0, radius, radius)
+            if self._selected == 3:
+                cr.set_source_rgba(accent[0], accent[1], accent[2], 0.13)
+            else:
+                cr.set_source_rgba(1, 1, 1, 0.05)
+            cr.fill()
+            cr.restore()
+
         # 条带与主区分隔线 + 键间分隔（细实线，弱化，不再用粗虚线）
         cr.set_source_rgba(1, 1, 1, 0.09)
         cr.set_line_width(1.0)
@@ -193,52 +208,78 @@ class TouchpadMap(Gtk.DrawingArea):
             cr.line_to(lx, strip_h - 1)
             cr.stroke()
 
-        # 选中键描边（accent 亮边 + 内侧微光；贴边角跟随底板圆角）
+        # 选中区域描边（accent 亮边 + 内侧微光；贴边角跟随底板圆角）
         if self._selected >= 0:
-            x0 = self._SPLITS[self._selected] * w
-            x1 = self._SPLITS[self._selected + 1] * w
-            kw = x1 - x0 - 2
-            kh = strip_h - 2
-            key_radius = min(8.0, kh / 2, kw / 2)
-            r_tl = r_tr = key_radius
-            if self._selected == 0:
-                r_tl = radius
-            elif self._selected == 2:
-                r_tr = radius
-            self._rounded_rect4(cr, x0 + 1, 1, kw, kh, r_tl, r_tr,
-                                key_radius, key_radius)
-            cr.set_source_rgba(accent[0], accent[1], accent[2], 0.55)
-            cr.set_line_width(2.0)
-            cr.stroke()
-            # 内侧微光：更细腻的选中层次
-            self._rounded_rect4(cr, x0 + 3, 3, kw - 4, kh - 4, r_tl - 2,
-                                r_tr - 2, key_radius - 2, key_radius - 2)
-            cr.set_source_rgba(accent[0], accent[1], accent[2], 0.18)
-            cr.set_line_width(1.0)
-            cr.stroke()
+            if self._selected == 3:
+                self._draw_main_border(cr, w, h, strip_h, radius, accent,
+                                       0.55, 2.0)
+            else:
+                x0 = self._SPLITS[self._selected] * w
+                x1 = self._SPLITS[self._selected + 1] * w
+                kw = x1 - x0 - 2
+                kh = strip_h - 2
+                key_radius = min(8.0, kh / 2, kw / 2)
+                r_tl = r_tr = key_radius
+                if self._selected == 0:
+                    r_tl = radius
+                elif self._selected == 2:
+                    r_tr = radius
+                self._rounded_rect4(cr, x0 + 1, 1, kw, kh, r_tl, r_tr,
+                                    key_radius, key_radius)
+                cr.set_source_rgba(accent[0], accent[1], accent[2], 0.55)
+                cr.set_line_width(2.0)
+                cr.stroke()
+                # 内侧微光：更细腻的选中层次
+                self._rounded_rect4(cr, x0 + 3, 3, kw - 4, kh - 4, r_tl - 2,
+                                    r_tr - 2, key_radius - 2, key_radius - 2)
+                cr.set_source_rgba(accent[0], accent[1], accent[2], 0.18)
+                cr.set_line_width(1.0)
+                cr.stroke()
         elif self._hovered >= 0:
-            x0 = self._SPLITS[self._hovered] * w
-            x1 = self._SPLITS[self._hovered + 1] * w
-            kw = x1 - x0 - 2
-            kh = strip_h - 2
-            key_radius = min(8.0, kh / 2, kw / 2)
-            r_tl = r_tr = key_radius
-            if self._hovered == 0:
-                r_tl = radius
-            elif self._hovered == 2:
-                r_tr = radius
-            self._rounded_rect4(cr, x0 + 1, 1, kw, kh, r_tl, r_tr,
-                                key_radius, key_radius)
-            cr.set_source_rgba(accent[0], accent[1], accent[2], 0.30)
-            cr.set_line_width(1.5)
-            cr.stroke()
+            if self._hovered == 3:
+                self._draw_main_border(cr, w, h, strip_h, radius, accent,
+                                       0.30, 1.5)
+            else:
+                x0 = self._SPLITS[self._hovered] * w
+                x1 = self._SPLITS[self._hovered + 1] * w
+                kw = x1 - x0 - 2
+                kh = strip_h - 2
+                key_radius = min(8.0, kh / 2, kw / 2)
+                r_tl = r_tr = key_radius
+                if self._hovered == 0:
+                    r_tl = radius
+                elif self._hovered == 2:
+                    r_tr = radius
+                self._rounded_rect4(cr, x0 + 1, 1, kw, kh, r_tl, r_tr,
+                                    key_radius, key_radius)
+                cr.set_source_rgba(accent[0], accent[1], accent[2], 0.30)
+                cr.set_line_width(1.5)
+                cr.stroke()
 
         # 三键文字：标签 + 克数
         for i in range(3):
             self._draw_key_text(cr, i, w, strip_h, accent)
 
         # 主点击区文字
-        self._draw_main_text(cr, w, h, strip_h)
+        self._draw_main_text(cr, w, h, strip_h, accent)
+
+    def _draw_main_border(self, cr, w, h, strip_h, radius, accent,
+                          alpha, width):
+        """主点击区的选中/悬停描边：双层，底角跟随底板圆角。"""
+        mw = w - 2
+        mh = h - strip_h - 2
+        mr = min(8.0, mh / 3)
+        self._rounded_rect4(cr, 1, strip_h + 1, mw, mh, mr, mr, radius, radius)
+        cr.set_source_rgba(accent[0], accent[1], accent[2], alpha)
+        cr.set_line_width(width)
+        cr.stroke()
+        # 内侧微光
+        self._rounded_rect4(cr, 3, strip_h + 3, mw - 4, mh - 4,
+                            max(1.0, mr - 2), max(1.0, mr - 2),
+                            max(1.0, radius - 2), max(1.0, radius - 2))
+        cr.set_source_rgba(accent[0], accent[1], accent[2], alpha * 0.33)
+        cr.set_line_width(max(1.0, width - 1))
+        cr.stroke()
 
     def _draw_key_text(self, cr, i, w, strip_h, accent):
         x0 = self._SPLITS[i] * w
@@ -273,7 +314,7 @@ class TouchpadMap(Gtk.DrawingArea):
         cr.move_to(x0, cy + 2)
         PangoCairo.show_layout(cr, value_layout)
 
-    def _draw_main_text(self, cr, w, h, strip_h):
+    def _draw_main_text(self, cr, w, h, strip_h, accent):
         text = (f"主点击区 · 点击力度 {self._main_force_g}g"
                 if self._main_force_g else "主点击区 · 整板可点击")
         layout = self._create_layout(text, 11)
@@ -282,7 +323,13 @@ class TouchpadMap(Gtk.DrawingArea):
         layout.set_ellipsize(Pango.EllipsizeMode.END)
         _tw, th = layout.get_pixel_size()
         fg = self.get_style_context().get_color()
-        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.45)
+        if self._selected == 3:
+            rgb, alpha = accent, 1.0
+        elif self._hovered == 3:
+            rgb, alpha = (fg.red, fg.green, fg.blue), 0.75
+        else:
+            rgb, alpha = (fg.red, fg.green, fg.blue), 0.45
+        cr.set_source_rgba(rgb[0], rgb[1], rgb[2], alpha)
         cr.move_to(0, (strip_h + h) / 2 - th / 2)
         PangoCairo.show_layout(cr, layout)
 

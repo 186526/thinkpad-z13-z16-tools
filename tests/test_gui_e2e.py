@@ -149,8 +149,8 @@ class GUITestCase(unittest.TestCase):
         """四者一致性：zone_values / 图 / 滑块 / combo 选中。"""
         w = self.win
         ck, rk = w._zone_keys_for_selected()
-        self.assertEqual(w.zone_click_scale.get_value(), w.zone_values[ck])
-        self.assertEqual(w.zone_release_scale.get_value(), w.zone_values[rk])
+        self.assertEqual(w.click_scale.get_value(), w.zone_values[ck])
+        self.assertEqual(w.release_scale.get_value(), w.zone_values[rk])
         for i in range(3):
             self.assertEqual(w.touchpad_map._forces[i],
                              w.zone_values[gui.ZONE_MAP[i][1]])
@@ -201,7 +201,7 @@ class GUITestCase(unittest.TestCase):
         self.wait_applied()
         self.assertEqual(self.fake.intensity, 100)
         w._on_zone_pick(1)
-        w.zone_click_scale.set_value(120)
+        w.click_scale.set_value(120)
         self.apply_all()
         self.assertEqual(self.fake.regs["zone_middle"], 60)
 
@@ -217,8 +217,10 @@ class GUITestCase(unittest.TestCase):
         self.assertEqual(cfg["click_release"], 108)
         self.assertEqual(cfg["zone_middle"], 76)
         self.assertEqual(cfg["zone_left_release"], 50)
-        # UI 同步回出厂值
+        # UI 同步回出厂值（切到主点击区查看整板力度）
+        w._set_selected_zone(3)
         self.assertEqual(int(round(w.click_scale.get_value())), 164)
+        self.assertEqual(int(round(w.release_scale.get_value())), 108)
         self.assertEqual(w.scale.get_value(), 50)
         self.assertEqual(w.zone_values["zone_middle"], 76)
 
@@ -242,12 +244,14 @@ class GUITestCase(unittest.TestCase):
         self.assertFalse(w._applying)
         self.assertFalse(w.apply_bar.get_visible())
         # on_ok 未执行（无新 toast 写入 config），UI 已按设备值回填
+        w._set_selected_zone(3)
         self.assertEqual(int(round(w.click_scale.get_value())), 164)
 
-    # ---------------- 点击力度 / 释放阈值 ----------------
+    # ---------------- 按压力度（滑块/预设按选中区域读写） ----------------
 
     def test_click_link_release_65(self):
         w = self.win
+        w._set_selected_zone(3)        # 编辑主点击区
         self.assertTrue(w.link_switch.get_active())
         w.click_scale.set_value(200)   # 联动：释放自动 65%
         self.assertEqual(int(round(w.release_scale.get_value())), 130)
@@ -264,6 +268,7 @@ class GUITestCase(unittest.TestCase):
 
     def test_click_without_link(self):
         w = self.win
+        w._set_selected_zone(3)        # 编辑主点击区
         w.link_switch.set_active(False)
         w.click_scale.set_value(240)
         self.apply_all()
@@ -272,14 +277,16 @@ class GUITestCase(unittest.TestCase):
 
     def test_release_slider_without_link(self):
         w = self.win
+        w._set_selected_zone(3)        # 编辑主点击区
         w.link_switch.set_active(False)
         w.release_scale.set_value(100)
         self.apply_all()
         self.assertEqual(self.fake.regs["click_release"], 50)
         self.assertEqual(self.cfg()["click_release"], 100)
 
-    def test_profile_preset(self):
+    def test_profile_preset_main_area(self):
         w = self.win
+        w._set_selected_zone(3)        # 主点击区预设（整板力度）
         # 轻触档：点击/释放写设备 + 滑块/图上主区/配置全部同步
         names = list(haptic.PROFILES)
         w.profile_row.set_selected(names.index("light"))
@@ -300,7 +307,7 @@ class GUITestCase(unittest.TestCase):
         self.assertEqual(cfg["click_release"],
                          haptic.PROFILES["light"]["click_release"])
 
-    # ---------------- 顶部按键（分区） ----------------
+    # ---------------- 顶部按键（图上分区 / 区域联动） ----------------
 
     def test_map_click_selects_zone(self):
         w = self.win
@@ -309,7 +316,7 @@ class GUITestCase(unittest.TestCase):
         self.assertEqual(w.zone_combo.get_selected(), 1)
         self.assertEqual(w.touchpad_map._selected, 1)
         # 滑块回填中键值
-        self.assertEqual(w.zone_click_scale.get_value(),
+        self.assertEqual(w.click_scale.get_value(),
                          w.zone_values["zone_middle"])
         self.assert_widgets_consistent()
 
@@ -320,12 +327,35 @@ class GUITestCase(unittest.TestCase):
         self.assertEqual(w.touchpad_map._selected, 2)
         self.assert_widgets_consistent()
 
+    def test_main_area_selectable_and_applies(self):
+        """主点击区是图内第 4 个区域：图上点击/下拉选中后，
+        同一组滑块编辑 click_force/click_release 并写设备。"""
+        w = self.win
+        w._on_zone_pick(3)             # 点击图上主点击区
+        self.assertEqual(w.selected_zone, 3)
+        self.assertEqual(w.zone_combo.get_selected(), 3)
+        self.assertEqual(w.touchpad_map._selected, 3)
+        self.assertEqual(w.click_scale.get_value(),
+                         w.zone_values["click_force"])
+        self.assert_widgets_consistent()
+        # 改主区力度并应用；再切到左键，滑块回填左键值（联动不串值）
+        w.link_switch.set_active(False)
+        w.click_scale.set_value(200)
+        self.apply_all()
+        self.assertEqual(self.fake.regs["click_force"], 100)
+        self.assertEqual(self.cfg()["click_force"], 200)
+        w._on_zone_pick(0)
+        self.assertEqual(w.click_scale.get_value(),
+                         w.zone_values["zone_left"])
+        self.assertEqual(w.touchpad_map._selected, 0)
+        self.assert_widgets_consistent()
+
     def test_zone_click_slider_applies(self):
         w = self.win
         w._on_zone_pick(1)             # 选中中键
-        w.zone_click_scale.set_value(120)
+        w.click_scale.set_value(120)
         self.assertEqual(w.zone_values["zone_middle"], 120)
-        self.assertEqual(w.zone_click_label.get_text(), "点击 120g")
+        self.assertEqual(w.click_label.get_text(), "点击 120g")
         self.assertEqual(w.touchpad_map._forces[1], 120)  # 图上数值同步
         self.apply_all()
         self.assertEqual(self.fake.regs["zone_middle"], 60)
@@ -337,10 +367,11 @@ class GUITestCase(unittest.TestCase):
 
     def test_zone_release_slider_applies(self):
         w = self.win
+        w.link_switch.set_active(False)  # 关闭联动才能独立改释放
         w._on_zone_pick(2)             # 选中右键
-        w.zone_release_scale.set_value(80)
+        w.release_scale.set_value(80)
         self.assertEqual(w.zone_values["zone_right_release"], 80)
-        self.assertEqual(w.zone_release_label.get_text(), "释放 80g")
+        self.assertEqual(w.release_label.get_text(), "释放 80g")
         self.assertEqual(w.touchpad_map._releases[2], 80)
         self.apply_all()
         self.assertEqual(self.fake.regs["zone_right_release"], 40)
@@ -351,21 +382,21 @@ class GUITestCase(unittest.TestCase):
         """三个键各自独立：改中键不影响左/右。"""
         w = self.win
         w._on_zone_pick(0)
-        w.zone_click_scale.set_value(90)
+        w.click_scale.set_value(90)
         self.apply_all()
         w._on_zone_pick(1)
-        w.zone_click_scale.set_value(150)
+        w.click_scale.set_value(150)
         self.apply_all()
         self.assertEqual(self.fake.regs["zone_left"], 45)
         self.assertEqual(self.fake.regs["zone_middle"], 75)
         self.assertEqual(self.fake.regs["zone_right"], 38)
 
-    def test_zone_profile_preset(self):
-        """按键预设：一键把左/中/右三键设为同一力度并同步设备/配置/图。"""
+    def test_profile_preset_applies_to_keys(self):
+        """预设档位：选中三键区域时，一键把左/中/右三键设为同一力度。"""
         w = self.win
+        w._on_zone_pick(1)             # 选中中键
         names = list(gui.ZONE_PRESETS)
-        w.zone_profile_row.set_selected(names.index("heavy"))
-        self.wait_applied()
+        w.profile_row.set_selected(names.index("heavy"))
         for _ztitle, click_key, release_key in gui.ZONE_MAP:
             self.assertEqual(
                 self.fake.regs[click_key],
@@ -475,6 +506,7 @@ class GUITestCase(unittest.TestCase):
 
     def test_refresh_reloads_state(self):
         w = self.win
+        w._set_selected_zone(3)        # 编辑主点击区，刷新后仍按主区回填
         w.click_scale.set_value(300)
         self.apply_all()
         # 外部改动设备（如固件默认）

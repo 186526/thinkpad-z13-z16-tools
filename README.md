@@ -15,12 +15,12 @@ are companion tools that complete a daily-driver toolkit.
   `0x00AB` and feature report 11 mirror each other
 - **Click force / release threshold** — 10-500 g, defaults 164 g / 108 g,
   optionally linked (release follows 65% of the click force)
+- **In-map zone selection** — click the left / middle / right top-edge keys
+  or the main click area on the visual touchpad map; the same sliders below
+  then edit the selected area
 - **Preset profiles** — light / standard / heavy, one-click apply to the
-  main-zone click + release
-- **Top-button presets** — set click + release for all three top-edge
-  buttons (left / middle / right) at once
-- **Per-zone forces** — one click / release slider per button zone,
-  selected by clicking a visual touchpad map
+  currently selected area (main area 110/72, 164/108, 240/156 g; top keys
+  55/36, 76/50, 110/72 g)
 - **Asynchronous writes + bottom progress bar** — device writes run on a
   background thread, the UI never blocks
 - **One-click factory reset** — writes all registers back to firmware
@@ -110,17 +110,17 @@ window: while a device write is in flight it shows a spinner and
   driver); 「恢复默认」 (restore default) resets it to 50. The device
   register `0x00AB` and feature report 11 are mirrored by the firmware:
   writing either one updates the other.
-- **Click force / release threshold** (group 「点击力度」) — 10-500 g; with
+- **Force settings** (group 「按压力度」) — one set of controls drives the
+  whole touchpad. **Click the touchpad graphic above** to pick the area you
+  want to adjust — the three top-edge zones (left / middle / right) or the
+  main click area — or use the 「要调整的区域」 dropdown. The 「点击」 (click)
+  and 「释放」 (release) sliders (10-500 g) then edit that area; with
   「释放力度自动跟随」 (link release) on, the release threshold follows the
   click force at 65% (recommended).
 - **Preset profiles** (「预设档位」) — 轻触 / 标准 / 重按 (light / standard /
-  heavy), applied to the main zone immediately (110/72, 164/108, 240/156 g).
-- **Top-button forces** (group 「顶部按键力度」) — per-button click / release
-  for the top-edge left / middle / right zones: **click the touchpad graphic
-  above** to pick a zone (or use the 「要调整的按键」 dropdown), then drag the
-  「点击」 (click) and 「释放」 (release) sliders; **「按键预设」** (button
-  presets) sets all three zones at once to 轻触 / 标准 / 重按
-  (55/36, 76/50, 110/72 g; the standard step is the factory default).
+  heavy), applied to the currently selected area immediately: the main area
+  uses 110/72, 164/108, 240/156 g (standard is the factory default), while
+  the top-edge keys all get 55/36, 76/50, 110/72 g.
 - **Factory reset** — the 「恢复出厂设置」 (factory reset) button at the bottom
   writes all force and haptic settings back to firmware defaults (click
   164 g / release 108 g / zones 76 g / intensity 50 %).
