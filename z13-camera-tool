@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""摄像头 IR/RGB 检测与切换引导(ThinkPad Z13 Gen 2)。
+
+背景:web 应用倾向优先选 IR 相机(04f2:b78c)导致画面失败/黑屏,本工具
+负责检测并给出应用级切换引导。
+
+用法:
+    z13-camera-tool            列出相机并标注 IR/RGB + 应用级引导
+    z13-camera-tool --json     以 JSON 输出设备清单(便于脚本消费)
+    z13-camera-tool --no-pw    跳过 PipeWire 节点探测(PIPEWIRE_NODE 提示)
+
+检测:
+    /sys/class/video4linux/video*/name + 上层 USB 设备的 idVendor/idProduct;
+    IR 判定:名称含 IR(整词)或 ID 匹配 04f2:b78c。v4l2-ctl --list-devices
+    可用时并排输出。
+
+引导:
+    - 应用内:相机选择里选 "Integrated Camera"(RGB),避开 "Integrated IR Camera"。
+    - 命令行 v4l2/gst 应用:device=/dev/video0(RGB 节点,示例见输出)。
+    - PipeWire 应用:export PIPEWIRE_NODE='<RGB 节点名>'——可行性由 pw-dump
+      实时探测(本机已确认可行);经 xdg-desktop-portal 的应用可能忽略该变量。
+
+不做 v4l2loopback(需 root,改动大)。
+"""
+
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+# IR 相机 USB ID(Chicony Integrated IR Camera)。RGB 相机为 04f2:b78b。
+IR_IDS = {("04f2", "b78c")}
+
+
+def _usb_id(v4l_path):
+    """从 /sys/class/video4linux/videoN 向上找到带 idVendor/idProduct 的目录。
+
+    返回 (vendor, product) 小写四位数,找不到返回 None。
+    """
+    try:
+        cur = os.path.realpath(v4l_path)
+    except OSError:
+        return None
+    while True:
+        vid = os.path.join(cur, "idVendor")
+        if os.path.exists(vid):
+            try:
+                with open(vid, encoding="utf-8") as f:
+                    v = f.read().strip().lower()
+                with open(os.path.join(cur, "idProduct"), encoding="utf-8") as f:
+                    p = f.read().strip().lower()
+                return (v, p)
+            except OSError:
+                return None
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def scan_v4l():
+    """列出全部 video4linux 设备:[{path,name,usb,ir}]。"""
+    out = []
+    for path in sorted(glob.glob("/sys/class/video4linux/video*")):
+        try:
+            with open(os.path.join(path, "name"), encoding="utf-8",
+                      errors="replace") as f:
+                name = f.read().strip()
+        except OSError:
+            name = "(读取 name 失败)"
+        ids = _usb_id(path)
+        ir = bool(re.search(r"\bir\b", name.lower())) or (ids in IR_IDS)
+        out.append({
+            "path": "/dev/" + os.path.basename(path),
+            "name": name,
+            "usb": f"{ids[0]}:{ids[1]}" if ids else "未知",
+            "ir": ir,
+        })
+    return out
+
+
+def v4l2_ctl_list():
+    """v4l2-ctl --list-devices 原始输出,不可用返回 None。"""
+    if not shutil.which("v4l2-ctl"):
+        return None
+    try:
+        r = subprocess.run(["v4l2-ctl", "--list-devices"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    return r.stdout
+
+
+def pipewire_nodes():
+    """{"/dev/videoN": node_name},经 pw-dump 探测;不可用返回 None。"""
+    if not shutil.which("pw-dump"):
+        return None
+    try:
+        r = subprocess.run(["pw-dump"], capture_output=True, text=True,
+                           timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        return None
+    out = {}
+    for obj in data:
+        if obj.get("type") != "PipeWire:Interface:Node":
+            continue
+        props = obj.get("info", {}).get("props", {}) or {}
+        if "Video" not in str(props.get("media.class", "")):
+            continue
+        opath = props.get("object.path") or ""
+        if opath.startswith("v4l2:/dev/video"):
+            out[opath[len("v4l2:"):]] = props.get("node.name")
+    return out or None
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--json", action="store_true", help="JSON 输出设备清单")
+    ap.add_argument("--no-pw", action="store_true",
+                    help="跳过 PipeWire 节点探测")
+    args = ap.parse_args()
+
+    cams = scan_v4l()
+    if not cams:
+        print("未找到摄像头设备(/sys/class/video4linux 为空)", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(cams, ensure_ascii=False, indent=2))
+        return 0
+
+    print("== 本机相机清单 ==")
+    for c in cams:
+        kind = "IR" if c["ir"] else "RGB"
+        print(f"  {c['path']:<10} {c['name']:<32} [{kind}] usb {c['usb']}")
+
+    v = v4l2_ctl_list()
+    if v:
+        print("\n== v4l2-ctl --list-devices(参考)==")
+        for line in v.splitlines():
+            print("  " + line)
+
+    rgb = [c for c in cams if not c["ir"]]
+    ir = [c for c in cams if c["ir"]]
+
+    print("\n== 应用级引导 ==")
+    print("  背景:web 应用倾向优先选 IR 相机(04f2:b78c),导致画面异常/黑屏。")
+    if rgb:
+        print("  1. 应用内选择:在相机的设备/来源列表里选 'Integrated Camera'(RGB),")
+        print("     避开 'Integrated IR Camera'。")
+        dev = rgb[0]["path"]
+        print(f"  2. 命令行 v4l2/gst 应用:用 RGB 节点 {dev}(gst 示例):")
+        print(f"       gst-launch-1.0 v4l2src device={dev} ! videoconvert ! autovideosink")
+    else:
+        print("  1. 未发现 RGB 相机,请检查驱动/线缆。")
+
+    if ir:
+        print(f"  IR 相机节点:{'、'.join(c['path'] for c in ir)}(勿选)")
+
+    if not args.no_pw:
+        pw = pipewire_nodes()
+        if pw:
+            name = pw.get(dev) if rgb else None
+            if name:
+                print(f"  3. PipeWire 应用:export PIPEWIRE_NODE='{name}'")
+                print("     (节点名由本机 pw-dump 实时探测,因机而异;")
+                print("      经 xdg-desktop-portal 的应用可能忽略该变量,需应用内选择)")
+            else:
+                print("  3. PipeWire:已探测到相机节点,但未匹配到 RGB 节点"
+                      "(可手动 pw-dump 查看)")
+        else:
+            print("  3. PipeWire:pw-dump 不可用或无相机节点,跳过 PIPEWIRE_NODE 提示")
+
+    print("\n  不做 v4l2loopback(需 root,改动大)。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

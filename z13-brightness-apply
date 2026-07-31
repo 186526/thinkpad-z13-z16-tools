@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""OLED 亮度 CLI(ThinkPad Z13 Gen 2,amdgpu 面板背光)。
+
+用法:
+    z13-brightness-apply --get               显示当前亮度(百分比 + 内核原始值)
+    z13-brightness-apply --set N             设置亮度 N(0-100,百分比)
+    z13-brightness-apply --to-windows N      Linux 亮度 N% ≈ Windows 亮度多少 %
+    z13-brightness-apply --to-linux N        Windows 亮度 N% ≈ Linux 亮度多少 %
+    z13-brightness-apply --device PATH       指定背光 sysfs 目录(默认自动探测)
+
+读写的是 /sys/class/backlight/<dev>/brightness,直接操作内核值;百分比换算
+供用户界面使用。写权限不足时给出明确中文错误,授权方案见
+docs/brightness-permissions.md。
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brightness  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--device", default=None, metavar="PATH",
+                    help="背光 sysfs 目录(默认自动探测)")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--get", action="store_true", help="显示当前亮度")
+    g.add_argument("--set", type=float, metavar="N", help="设置亮度百分比 0-100")
+    g.add_argument("--to-windows", type=float, metavar="N", dest="to_windows",
+                   help="Linux 亮度 N% → Windows 亮度 %")
+    g.add_argument("--to-linux", type=float, metavar="N", dest="to_linux",
+                   help="Windows 亮度 N% → Linux 亮度 %")
+    args = ap.parse_args()
+
+    dev = args.device or brightness.find_backlight()
+    if dev is None:
+        print(f"未找到背光设备: {brightness.DETECT_ERROR}", file=sys.stderr)
+        return 1
+
+    if args.to_windows is not None:
+        print(f"Linux {args.to_windows:g}% ≈ Windows "
+              f"{brightness.to_windows(args.to_windows):.1f}%")
+        return 0
+    if args.to_linux is not None:
+        print(f"Windows {args.to_linux:g}% ≈ Linux "
+              f"{brightness.to_linux(args.to_linux):.1f}%")
+        return 0
+
+    mx = brightness.get_max_brightness(dev)
+    if mx is None or mx <= 0:
+        print("无法读取 max_brightness", file=sys.stderr)
+        return 1
+
+    if args.get:
+        cur = brightness.get_brightness(dev)
+        if cur is None:
+            return 1
+        print(f"当前亮度: {brightness.to_percent(cur, dev)}% ({cur} / {mx})")
+        return 0
+
+    if args.set is not None:
+        pct = args.set
+        if not 0 <= pct <= 100:
+            print(f"亮度 {pct}% 超出 0-100,已钳制为 {max(0.0, min(100.0, pct))}%",
+                  file=sys.stderr)
+            pct = max(0.0, min(100.0, pct))
+        raw = brightness.from_percent(pct, dev)
+        if raw is None:
+            return 1
+        if not brightness.set_brightness(raw, dev):
+            return 1
+        back = brightness.get_brightness(dev)
+        if back == raw:
+            bpct = brightness.to_percent(back, dev)
+            print(f"亮度已设为 {pct:g}% (raw {raw});回读 {bpct}% ({back})")
+            return 0
+        print(f"亮度已写 {raw},但回读为 {back},与预期不符", file=sys.stderr)
+        return 1
+
+    ap.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

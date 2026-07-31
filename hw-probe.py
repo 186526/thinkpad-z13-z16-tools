@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Z13 Gen 2 未验证硬件探测(指纹 / TPM / IR+RGB 相机)。
+
+只读探测 /sys、/dev 与 lsusb,把结果写入 docs/hardware-findings.md
+(本地自用,不回传任何地方)。
+
+用法:
+    hw-probe.py            探测并打印表格,同时写 docs/hardware-findings.md
+    hw-probe.py --no-write 只打印,不写文档
+
+状态含义:
+    工作   —— 已检测到且可用/已绑定
+    未测试 —— 已检测到,但缺驱动绑定或权限不足,需图形会话/提权后确认
+    缺失   —— 未检测到
+"""
+
+import argparse
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FINDINGS_FILE = os.path.join(BASE_DIR, "docs", "hardware-findings.md")
+
+# Synaptics 指纹 06cb:0123
+FP_VENDOR, FP_PRODUCT = "06cb", "0123"
+# IR 相机(Chicony);RGB 为 04f2:b78b,IR 为 04f2:b78c
+IR_IDS = {("04f2", "b78c")}
+
+
+def lsusb_devices():
+    """lsusb 输出的 (vendor, product, 整行);lsusb 不可用返回空表。"""
+    out = []
+    if shutil.which("lsusb"):
+        try:
+            r = subprocess.run(["lsusb"], capture_output=True, text=True,
+                               timeout=10)
+            if r.returncode == 0:
+                for line in r.stdout.splitlines():
+                    m = re.search(r"([0-9a-f]{4}):([0-9a-f]{4})", line, re.I)
+                    if m:
+                        out.append((m.group(1).lower(), m.group(2).lower(), line))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return out
+
+
+def sysfs_usb_devices():
+    """/sys/bus/usb/devices/* 的 (vendor, product, 设备目录)。"""
+    out = []
+    for vfile in sorted(glob.glob("/sys/bus/usb/devices/*/idVendor")):
+        path = os.path.dirname(vfile)
+        try:
+            with open(vfile, encoding="utf-8") as f:
+                v = f.read().strip().lower()
+            with open(os.path.join(path, "idProduct"), encoding="utf-8") as f:
+                p = f.read().strip().lower()
+            out.append((v, p, path))
+        except OSError:
+            continue
+    return out
+
+
+def probe_fingerprint():
+    """指纹:优先 lsusb,否则扫 sysfs;报告存在性与驱动绑定。"""
+    found, src = None, "sysfs"
+    for v, p, info in sysfs_usb_devices():
+        if (v, p) == (FP_VENDOR, FP_PRODUCT):
+            found, src = info, "sysfs"
+            break
+    if not found:
+        for v, p, line in lsusb_devices():
+            if (v, p) == (FP_VENDOR, FP_PRODUCT):
+                found, src = line, "lsusb"
+                break
+    if not found:
+        return ("缺失", "未在 USB 总线发现 06cb:0123")
+    bound = False
+    if os.path.isdir(found):
+        for iface in glob.glob(os.path.join(found, "*:1.*")):
+            if os.path.islink(os.path.join(iface, "driver")):
+                bound = True
+                break
+    if bound:
+        return ("工作", f"06cb:0123 已检测到且接口已绑定驱动({src})")
+    return ("未测试",
+            f"06cb:0123 已检测到({src}),但接口未绑定驱动,fprintd 可能不可用")
+
+
+def probe_tpm():
+    """TPM:tpm_version_major + /dev/tpm0 是否存在。"""
+    ver = None
+    try:
+        with open("/sys/class/tpm/tpm0/tpm_version_major", encoding="utf-8") as f:
+            ver = f.read().strip()
+    except OSError:
+        pass
+    dev0 = os.path.exists("/dev/tpm0")
+    if not ver and not dev0:
+        return ("缺失", "未发现 tpm0(/sys/class/tpm 无 tpm0,/dev/tpm0 不存在)")
+    note = f"TPM {'2.0' if ver == '2' else ver or '未知版本'}(tpm_version_major)"
+    if dev0:
+        try:
+            fd = os.open("/dev/tpm0", os.O_RDONLY)
+            os.close(fd)
+            return ("工作", f"{note},/dev/tpm0 存在且可打开")
+        except OSError as e:
+            return ("工作", f"{note},/dev/tpm0 存在(当前用户无法打开:{e.strerror};"
+                            f"需 tss 组或 root)")
+    return ("未测试", f"{note},但 /dev/tpm0 不存在")
+
+
+def _v4l_cameras():
+    """video4linux 设备:[{path, name, ir}]。"""
+    out = []
+    for path in sorted(glob.glob("/sys/class/video4linux/video*")):
+        try:
+            with open(os.path.join(path, "name"), encoding="utf-8",
+                      errors="replace") as f:
+                name = f.read().strip()
+        except OSError:
+            name = "(读取 name 失败)"
+        ir = bool(re.search(r"\bir\b", name.lower()))
+        out.append({"/dev/" + os.path.basename(path): name, "ir": ir})
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--no-write", action="store_true",
+                    help="只打印,不写 docs/hardware-findings.md")
+    args = ap.parse_args()
+
+    rows = [
+        ("指纹 06cb:0123", *probe_fingerprint()),
+        ("TPM", *probe_tpm()),
+    ]
+    cams = _v4l_cameras()
+    ir = [c for c in cams if c["ir"]]
+    rgb = [c for c in cams if not c["ir"]]
+    rows.append(("IR 相机",
+                 "工作" if ir else "缺失",
+                 ("节点 " + "、".join(list(c)[0] for c in ir) + "(" +
+                  next(iter(ir[0].values())) + ")") if ir else "无 IR 相机"))
+    rows.append(("RGB 相机",
+                 "工作" if rgb else "缺失",
+                 ("节点 " + "、".join(list(c)[0] for c in rgb) + "(" +
+                  next(iter(rgb[0].values())) + ")") if rgb else "无 RGB 相机"))
+
+    # ── 打印表格 ──────────────────────────────────────────────
+    w_dev = max(len(r[0]) for r in rows) + 1
+    w_st = max(len(r[1]) for r in rows) + 1
+    print("设备".ljust(w_dev) + "状态".ljust(w_st) + "说明")
+    print("-" * (w_dev + w_st + 40))
+    for dev, st, note in rows:
+        print(dev.ljust(w_dev) + st.ljust(w_st) + note)
+
+    # ── 写文档 ────────────────────────────────────────────────
+    if args.no_write:
+        return 0
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    with open(FINDINGS_FILE, "w", encoding="utf-8") as f:
+        f.write(f"# 硬件探测结果(ThinkPad Z13 Gen 2,本地自用)\n\n")
+        f.write(f"- 生成时间:{now}\n")
+        f.write(f"- 由 `hw-probe.py` 生成,仅记录本机探测结果,不回传。\n\n")
+        f.write("| 设备 | 状态 | 说明 |\n|---|---|---|\n")
+        for dev, st, note in rows:
+            f.write(f"| {dev} | {st} | {note} |\n")
+        f.write("\n## 备注\n\n")
+        f.write("- 状态含义:工作=已检测到且可用/已绑定;未测试=已检测到但缺驱动"
+                "绑定或权限不足;缺失=未检测到。\n")
+        f.write("- 指纹 06cb:0123(Synaptics):若接口未绑定驱动,fprintd 可能不可用"
+                ",需用户确认内核模块/固件。\n")
+        f.write("- /dev/tpm0 访问需 tss 组或 root(存在不等于当前用户可打开)。\n")
+        f.write("- IR 相机 USB ID 04f2:b78c,RGB 相机 04f2:b78b;web 应用倾向"
+                "优先选 IR,参考 z13-camera-tool。\n")
+        f.write("- 与 Arch Wiki 硬件表对照仅作参考,本文件自用。\n")
+    print(f"\n已写入 {FINDINGS_FILE}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
