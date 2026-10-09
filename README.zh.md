@@ -30,7 +30,8 @@
 - **相机检测** —— 把 `/dev/video*` 标注为 IR / RGB,给出应用级切换引导
 - **GPU reset 监控** —— 监听内核日志中的 amdgpu 重置并记录 / 通知
 - **硬件探测** —— 指纹 / TPM / 摄像头探测,结果写入 `docs/hardware-findings.md`
-- **GNOME 快速设置扩展** —— 快速设置面板里一键开关触感强度
+- **GNOME 快速设置扩展** —— 快速设置面板里五档调节触感强度(0/25/50/75/100,
+  参照内置"键盘"亮度项)
   (调 `z13-touchpad-apply` CLI,不重实现 HID 协议)
 
 > 参考资料:[Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2 – Haptic Touchpad](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2#Haptic_Touchpad)
@@ -44,14 +45,14 @@
 libadwaita,无需安装任何包(下方 `/dev/hidraw*` 权限要求仍然适用):
 
 ```bash
-chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
-./thinkpad-z13-z16-tools-v0.1.0.AppImage
+chmod +x thinkpad-z13-z16-tools-v0.2.0.AppImage
+./thinkpad-z13-z16-tools-v0.2.0.AppImage
 ```
 
 自行构建(需要 `appimagetool`):
 
 ```bash
-VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
+VERSION=v0.2.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
 ```
 
 注意:AppImage 提供的是 GUI;命令行工具(`z13-touchpad-apply` 等)请从源码
@@ -130,7 +131,7 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
   `z13-touchpad-haptic.service`(登录时应用)与 `z13-touchpad-resume.service`
   (休眠唤醒后应用,基于 `PrepareForSleep` D-Bus 信号监听)。
 
-### 配套工具(分组「配套工具」)
+### 配套工具(分组「开关与调节」/「检测与维护」/「状态与记录」)
 
 - **GNOME 快速设置开关** —— 未安装时按钮为「安装」,点击运行
   `extensions/install.sh`;已安装时按钮变为「卸载」,点击后从启用列表移除
@@ -138,7 +139,7 @@ VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
 - **OLED 亮度** —— 滑块直接写系统背光;不可用时显示
   「不可用(权限或设备缺失)」,授权方案见
   [docs/brightness-permissions.md](docs/brightness-permissions.md)。
-- **相机检测** —— 「重新检测」按钮实时探测 IR / RGB 相机。
+- **相机检测** —— 「检测」按钮实时探测 IR / RGB 相机(首次探测成功后变为「重新检测」)。
 - **GPU 重置监控** —— 只读展示最近的 amdgpu 重置记录(常驻监听由
   systemd 用户服务运行,见下文)。
 - **硬件探测** —— 「运行」按钮执行 `bin/z13-hw-probe`,结果写入
@@ -206,7 +207,7 @@ feature 报告 7(256 字节 Win8 PTP blob)的单字段读写器,写前自动保�
 
 ```bash
 ./experiments/feature-probe.py --dump                # 显示全部 feature 报告
-./experiments/feature-probe.py --read 7              # 读报告 7
+./experiments/feature-probe.py --read 0              # 读报告 7 的第 N 字节(0-255)
 ./experiments/feature-probe.py --write 7 0x00        # 写报告 7 的一个字段(先快照)
 ./experiments/feature-probe.py --restore             # 还原快照
 ./experiments/feature-probe.py --device /dev/hidrawN # 指定设备(默认自动探测)
@@ -237,15 +238,14 @@ D-Bus `PrepareForSleep` 监听:机器唤醒后重跑 `z13-touchpad-apply` 并(�
 ### 功能
 
 `extensions/z13-touchpad-quick@user` 在 GNOME 快速设置面板加入一个
-「触感强度」开关(图标为触控板):
+「触感强度」调节项(图标为触控板,参照内置的"键盘"亮度项):
 
-- 开 → `z13-touchpad-apply --set-haptic 100`;关 → `--set-haptic 0`
-- 状态 → `z13-touchpad-apply --get` 回读(0-100,`>0` 视为开),在子进程
-  退出后才更新开关状态
+- 点整行 = 开关:关 ↔ 上次非零档位
+- 点右侧菜单按钮弹出 **5 个档位按钮**(0/25/50/75/100,与固件吸附档
+  一致),当前档位高亮,点选即写
+- 写入 → `z13-touchpad-apply --set-haptic N`;状态 → `--get` 回读,在
+  子进程退出后才更新 UI
 - 只调用 CLI,**不在 JS 里重实现任何 HID 协议**
-
-> 开关「开」会把强度设为 100(默认);想用其它值,改 `extension.js` 顶部
-> 的 `ON_INTENSITY` 常量。
 
 ### 安装与启用
 
@@ -269,7 +269,7 @@ gnome-extensions enable z13-touchpad-quick@user
 
 ### 卸载
 
-- GUI:设置页「配套工具」→「GNOME 快速设置开关」按钮变为「卸载」,点击
+- GUI:设置页「开关与调节」→「GNOME 快速设置开关」按钮变为「卸载」,点击
   即从启用列表移除并删除扩展目录。
 - 手动:`gnome-extensions disable z13-touchpad-quick@user`,删除
   `~/.local/share/gnome-shell/extensions/z13-touchpad-quick@user`,并从
@@ -280,8 +280,7 @@ gnome-extensions enable z13-touchpad-quick@user
 - 本扩展在 **GNOME 50.2** 上验证;`metadata.json` 声明 `shell-version`
   **45-50,但 45-49 未验证**。GNOME 大版本升级后若开关不显示,先检查 API
   是否变化并更新 `shell-version`。
-- 只做「触感强度」开关一个 toggle;「触控板开关」(HID 报告 6)语义尚未
-  确认,确认前不接入。
+- 只做「触感强度」调节一项;「触控板开关」(HID 报告 6)语义尚未确认,确认前不接入。
 - 状态只在启用时与每次点击后刷新;GUI 里改动强度后,开关状态到下次点击
   或重载扩展时才会同步。
 - 开关不显示:查看 shell 日志
@@ -326,6 +325,7 @@ amdgpu GPU reset(如遇驱动异常自动重置 GPU)会造成短暂黑屏 / 卡�
 - 匹配内核日志中 `GPU reset` 或 (amdgpu + RAS) 的行;
 - 追加时间戳行到 `~/.config/z13-g2-tools/gpu-resets.log`(目录自动创建);
 - `notify-send` 可用且存在图形会话时弹通知(缺失时静默,仅记录);
+- `--selftest` 自测过滤与日志追加(不碰内核日志);
 - 常驻方式(可选 systemd 用户服务,示例见脚本 docstring):
 
 ```bash
@@ -446,6 +446,7 @@ uevent 中的 `SNSL002` 或 `00002C2F:0000002`。使用两条通道:
 |---|---|
 | `z13_tools/haptic.py` | 设备检测 + feature 报告 ioctl + 寄存器管道(仅标准库,核心) |
 | `z13_tools/brightness.py` | OLED 背光探测 + 读写 + Linux↔Windows 刻度换算(仅标准库) |
+| `z13_tools/camera.py` | video4linux 扫描 + IR/RGB 判定(`bin/z13-camera-tool` 与 `bin/z13-hw-probe` 共用,仅标准库) |
 | `z13_tools/gui/app.py` | GTK4/libadwaita GUI(设置 + 预设 + 分区 + 配套工具 + 开发者模式) |
 | `z13_tools/gui/utils.py` | GUI 的非 GTK 支撑:常量、配置读写、systemd 自启动、配套工具 |
 | `z13_tools/gui/touchpad_map.py` | 自绘可点击触控板组件(`TouchpadMap`) |
@@ -460,7 +461,7 @@ uevent 中的 `SNSL002` 或 `00002C2F:0000002`。使用两条通道:
 | `experiments/blob-sweep.py` | 实验性 report 7 逐字节扫描器,带快照/还原(危险,未运行) |
 | `packaging/build-appimage.sh` | AppImage 构建脚本(本地与 CI 共用) |
 | `packaging/icon-*.png` | 应用图标 |
-| `extensions/z13-touchpad-quick@user` | GNOME 快速设置触感开关扩展 |
+| `extensions/z13-touchpad-quick@user` | GNOME 快速设置五档触感强度扩展 |
 | `extensions/install.sh` | 扩展安装脚本(幂等,写入启用列表) |
 | `docs/` | 权限说明 + 硬件探测结果 |
 | `tests/test_gui_e2e.py` | 驱动级 e2e 测试(29 用例,需 DISPLAY:`GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |

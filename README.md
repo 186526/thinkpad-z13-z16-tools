@@ -39,9 +39,9 @@ are companion tools that complete a daily-driver toolkit.
   logs them and notifies
 - **Hardware probe** — fingerprint / TPM / camera probe, writes
   `docs/hardware-findings.md`
-- **GNOME Quick Settings extension** — one-click haptic-intensity toggle in
-  the Quick Settings panel (calls the `z13-touchpad-apply` CLI, no HID
-  protocol re-implemented in JS)
+- **GNOME Quick Settings extension** — five-level (0/25/50/75/100)
+  haptic-intensity control in the Quick Settings panel (calls the
+  `z13-touchpad-apply` CLI, no HID protocol re-implemented in JS)
 
 > Reference: [Arch Wiki – Lenovo ThinkPad Z13/Z16 Gen 2 – Haptic Touchpad](https://wiki.archlinux.org/title/Lenovo_ThinkPad_Z13/Z16_Gen_2#Haptic_Touchpad)
 
@@ -55,14 +55,14 @@ it bundles Python, PyGObject, GTK4 and libadwaita, so no package install is
 needed (the `/dev/hidraw*` permission requirement below still applies):
 
 ```bash
-chmod +x thinkpad-z13-z16-tools-v0.1.0.AppImage
-./thinkpad-z13-z16-tools-v0.1.0.AppImage
+chmod +x thinkpad-z13-z16-tools-v0.2.0.AppImage
+./thinkpad-z13-z16-tools-v0.2.0.AppImage
 ```
 
 Build it yourself (requires `appimagetool`):
 
 ```bash
-VERSION=v0.1.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
+VERSION=v0.2.0 APPIMAGETOOL=/path/to/appimagetool ./packaging/build-appimage.sh
 ```
 
 Note: the AppImage ships the GUI; the command-line tools
@@ -152,7 +152,7 @@ window: while a device write is in flight it shows a spinner and
   and `z13-touchpad-resume.service` (apply after suspend, via a
   `PrepareForSleep` D-Bus watcher).
 
-### Companion tools (group 「配套工具」)
+### Companion tools (groups 「开关与调节」 / 「检测与维护」 / 「状态与记录」)
 
 - **GNOME 快速设置开关** (GNOME Quick Settings toggle) — button reads
   「安装」 (install) when missing and runs `extensions/install.sh`; once
@@ -162,8 +162,9 @@ window: while a device write is in flight it shows a spinner and
   directly; when unavailable it shows 「不可用(权限或设备缺失)」 ("unavailable —
   permissions or device missing"); see
   [docs/brightness-permissions.md](docs/brightness-permissions.md).
-- **相机检测** (camera detection) — 「重新检测」 (re-detect) button probes
-  IR/RGB cameras on demand.
+- **相机检测** (camera detection) — 「检测」 (detect) button probes
+  IR/RGB cameras on demand (it becomes 「重新检测」 after a first successful
+  probe).
 - **GPU 重置监控** (GPU-reset monitor) — read-only display of recent amdgpu
   resets (the persistent watcher is a systemd user service, see below).
 - **硬件探测** (hardware probe) — 「运行」 (run) button executes `bin/z13-hw-probe`,
@@ -233,7 +234,7 @@ it snapshots the bank to `/tmp/z13_bank_snapshot.bin` before writing:
 
 ```bash
 ./experiments/feature-probe.py --dump                # show all feature reports
-./experiments/feature-probe.py --read 7              # read report 7
+./experiments/feature-probe.py --read 0              # read bank byte N (0-255) of report 7
 ./experiments/feature-probe.py --write 7 0x00        # write one field of report 7 (snapshotted first)
 ./experiments/feature-probe.py --restore             # restore the saved snapshot
 ./experiments/feature-probe.py --device /dev/hidrawN # explicit device (default: auto-detect)
@@ -266,15 +267,17 @@ it is invoked by `z13-touchpad-apply --watch-test`.
 ### What it does
 
 `extensions/z13-touchpad-quick@user` adds a 「触感强度」 (haptic intensity)
-toggle to the GNOME Quick Settings panel (touchpad icon):
+control to the GNOME Quick Settings panel (touchpad icon), modeled after the
+built-in Keyboard brightness item:
 
-- On → `z13-touchpad-apply --set-haptic 100`; off → `--set-haptic 0`
-- State → read back via `z13-touchpad-apply --get` (0-100, `>0` = on), the
-  toggle is updated only after the subprocess exits
+- Clicking the row toggles it **off** / back to the last non-zero level
+- The menu button (right side) opens **5 discrete level buttons**
+  (0/25/50/75/100, matching the firmware snap levels); the current level is
+  highlighted and clicking one writes it immediately
+- Writes via `z13-touchpad-apply --set-haptic N`; state is read back via
+  `z13-touchpad-apply --get` and the UI is updated only after the subprocess
+  exits
 - It only calls the CLI — **no HID protocol is re-implemented in JS**
-
-> Turning the toggle on sets the intensity to 100 (default); change the
-> `ON_INTENSITY` constant at the top of `extension.js` for other values.
 
 ### Install & enable
 
@@ -301,7 +304,7 @@ gnome-extensions enable z13-touchpad-quick@user
 
 ### Uninstall
 
-- From the GUI: Settings → 「配套工具」 → the button next to
+- From the GUI: Settings → 「开关与调节」 → the button next to
   「GNOME 快速设置开关」 reads 「卸载」 — clicking it removes the UUID from the
   enabled list and deletes the extension directory.
 - Manually: `gnome-extensions disable z13-touchpad-quick@user`, delete
@@ -313,9 +316,9 @@ gnome-extensions enable z13-touchpad-quick@user
 - Verified on **GNOME 50.2**; `metadata.json` declares `shell-version`
   **45-50, but 45-49 is unverified**. After a major GNOME upgrade, if the
   toggle disappears check for API changes and update `shell-version`.
-- Only the haptic-intensity toggle is implemented; the "touchpad enable"
+- Only the haptic-intensity control is implemented; the "touchpad enable"
   switch (HID report 6) is not wired up until its semantics are confirmed.
-- State refreshes on enable and after each click; intensity changed in the
+- State refreshes on enable and after each change; intensity changed in the
   GUI is reflected only after the next click or a reload.
 - Toggle not showing: check the shell log
   `journalctl --user -b | grep z13-touchpad-quick`.
@@ -367,6 +370,8 @@ brief black screen / stutter, worth logging for later debugging.
   (directory auto-created);
 - shows a desktop notification when `notify-send` is available and a
   graphical session exists (silently logs otherwise);
+- `--selftest` runs the filter + log-append unit self-test without touching
+  the kernel log;
 - can run as a systemd user service (example in the script's docstring):
 
 ```bash
@@ -501,6 +506,7 @@ GUI); `bin/` holds the CLI entrypoints; `monitors/` the always-on watchers;
 |---|---|
 | `z13_tools/haptic.py` | device detection + feature-report ioctls + register pipe (stdlib only, core) |
 | `z13_tools/brightness.py` | OLED backlight detection + read/write + Linux↔Windows scale (stdlib only) |
+| `z13_tools/camera.py` | video4linux scan + IR/RGB classification (shared by `bin/z13-camera-tool` and `bin/z13-hw-probe`, stdlib only) |
 | `z13_tools/gui/app.py` | GTK4/libadwaita GUI (settings + presets + zones + companion tools + developer mode) |
 | `z13_tools/gui/utils.py` | GUI's non-GTK support: constants, config IO, systemd autostart, companion tools |
 | `z13_tools/gui/touchpad_map.py` | self-drawn clickable touchpad widget (`TouchpadMap`) |
@@ -515,7 +521,7 @@ GUI); `bin/` holds the CLI entrypoints; `monitors/` the always-on watchers;
 | `experiments/blob-sweep.py` | experimental report-7 byte sweeper with snapshot/restore (dangerous, not run) |
 | `packaging/build-appimage.sh` | AppImage build script (local + CI) |
 | `packaging/icon-*.png` | app icons |
-| `extensions/z13-touchpad-quick@user` | GNOME Quick Settings haptic toggle extension |
+| `extensions/z13-touchpad-quick@user` | GNOME Quick Settings 5-level haptic-intensity extension |
 | `extensions/install.sh` | extension installer (idempotent, writes the enabled list) |
 | `docs/` | permission notes + hardware findings |
 | `tests/test_gui_e2e.py` | driver-level e2e tests (29 cases, needs DISPLAY: `GDK_BACKEND=x11 python3 tests/test_gui_e2e.py`) |
