@@ -15,24 +15,16 @@ Three pages:
                driver, kernel module) parsed from /sys/class/hidraw sysfs.
 """
 
-import ast
-import json
-import math
 import os
-import shutil
-import subprocess
 import sys
 import threading
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-gi.require_version("Pango", "1.0")
-gi.require_version("PangoCairo", "1.0")
 from gi.repository import (  # noqa: E402
-    Adw, Gdk, Gio, GLib, Gtk, Pango, PangoCairo,
+    Adw, Gio, GLib, Gtk,
 )
 try:  # noqa: E402
     import cairo  # pycairo，用于渐变等高级绘制
@@ -66,6 +58,11 @@ def load_config():
 def save_config(**values):
     """写配置文件；同上，把 gui.CONFIG_FILE 显式传给实现。"""
     gui_utils.save_config(CONFIG_FILE, **values)
+
+
+def _snap_intensity(value):
+    """把触感强度吸附到 INTENSITY_STEP 的整数档位（0/25/50/75/100）。"""
+    return int(round(value / INTENSITY_STEP) * INTENSITY_STEP)
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -462,7 +459,7 @@ class MainWindow(Adw.ApplicationWindow):
         # 统一入口：同时刷新 combo/高亮/滑块/预设行/图上数值，修复选中态分歧
         self._set_selected_zone(self.selected_zone)
 
-        snapped = int(round(self.current / INTENSITY_STEP) * INTENSITY_STEP)
+        snapped = _snap_intensity(self.current)
         self.scale.set_value(snapped)
         self.value_label.set_text(str(snapped))
         self._set_controls_enabled(True)
@@ -515,7 +512,7 @@ class MainWindow(Adw.ApplicationWindow):
     # ---------------- intensity ----------------
 
     def _on_value_changed(self, scale):
-        value = int(round(scale.get_value() / INTENSITY_STEP) * INTENSITY_STEP)
+        value = _snap_intensity(scale.get_value())
         self.value_label.set_text(str(value))
         if self._initializing or self.device is None:
             return
@@ -529,7 +526,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._debounce_id = None
         if self.device is None:
             return GLib.SOURCE_REMOVE
-        value = int(round(self.scale.get_value() / INTENSITY_STEP) * INTENSITY_STEP)
+        value = _snap_intensity(self.scale.get_value())
         # 回填时屏蔽回调，避免 set_value 触发 value-changed 再排一次防抖
         hid = self.scale.handler_block_by_func(self._on_value_changed)
         try:
@@ -601,9 +598,7 @@ class MainWindow(Adw.ApplicationWindow):
                     for key, grams in targets}
 
         def work():
-            for key, raw in raw_vals.items():
-                reg = haptic.REGISTERS_BY_KEY[key]
-                haptic.write_register(self.device, reg.addr, raw)
+            self._write_registers(raw_vals)
 
         def on_ok(_result):
             # 同步模型/滑块/图/配置（raw*2 显示，与 _apply_all 一致）
@@ -697,12 +692,18 @@ class MainWindow(Adw.ApplicationWindow):
         click_key, release_key = self._zone_keys_for_selected()
         click_g = int(round(self.click_scale.get_value()))
         click_raw = haptic.REGISTERS_BY_KEY[click_key].from_human(click_g)
-        rel_raw = max(1, round(click_raw * 0.65))
+        rel_raw = haptic.release_raw_for_click(click_raw)
         self._syncing = True
         self.release_scale.set_value(rel_raw * 2)
         self.release_label.set_text(f"释放 {rel_raw * 2}g")
         self.zone_values[release_key] = rel_raw * 2
         self._syncing = False
+
+    def _write_registers(self, raw_values):
+        """把 {key: raw} 映射依次写入设备寄存器（后台线程调用）。"""
+        for key, raw in raw_values.items():
+            reg = haptic.REGISTERS_BY_KEY[key]
+            haptic.write_register(self.device, reg.addr, raw)
 
     def _schedule_apply(self):
         if self._apply_id is not None:
@@ -718,7 +719,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.zone_values[ck] = int(round(self.click_scale.get_value()))
         if self.link_switch.get_active():
             click_raw = haptic.REGISTERS_BY_KEY[ck].from_human(self.zone_values[ck])
-            rel_raw = max(1, round(click_raw * 0.65))
+            rel_raw = haptic.release_raw_for_click(click_raw)
             self.zone_values[rk] = rel_raw * 2
         else:
             self.zone_values[rk] = int(round(self.release_scale.get_value()))
@@ -727,9 +728,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def work():
             # 后台线程执行设备 ioctl（含 ACK 等待），避免 UI 卡顿
-            for key, raw in raw_values.items():
-                reg = haptic.REGISTERS_BY_KEY[key]
-                haptic.write_register(self.device, reg.addr, raw)
+            self._write_registers(raw_values)
 
         def on_ok(_result):
             # 把滑块同步到设备真实值（raw*2），避免 165g -> raw 83 -> 166g 显示偏差
@@ -813,13 +812,11 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         def work():
-            for reg in haptic.REGISTERS:
-                haptic.write_register(self.device, reg.addr, reg.default)
+            self._write_registers({reg.key: reg.default for reg in haptic.REGISTERS})
 
         def on_ok(_result):
             self._load_state()  # 重读设备，刷新全部滑块/图上数值
-            cfg = {"haptic_intensity":
-                   int(round(self.current / INTENSITY_STEP) * INTENSITY_STEP)}
+            cfg = {"haptic_intensity": _snap_intensity(self.current)}
             cfg.update(self.zone_values)
             save_config(**cfg)
             self._show_toast("已恢复出厂设置")
@@ -841,11 +838,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.ext_button.set_label("安装")
             self.ext_button.remove_css_class("destructive-action")
             self.ext_button.add_css_class("suggested-action")
-        try:
-            raw = brightness.get_brightness()
-            pct = brightness.to_percent(raw) if raw is not None else None
-        except OSError:
-            pct = None
+        # get_brightness() 已捕获 OSError 并返回 None，无需再包 try/except
+        raw = brightness.get_brightness()
+        pct = brightness.to_percent(raw) if raw is not None else None
         if pct is None:
             self.brightness_row.set_subtitle("不可用（权限或设备缺失）")
             self.brightness_scale.set_sensitive(False)

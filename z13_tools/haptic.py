@@ -237,6 +237,11 @@ class Register:
         return f"{self.to_human(raw)}{self.suffix}"
 
 
+def release_raw_for_click(click_raw):
+    """释放阈值 raw = 点击力度 raw 的 65%（至少 1），与 GUI 联动规则一致。"""
+    return max(1, round(click_raw * 0.65))
+
+
 REGISTERS = (
     Register(0x0038, "click_force", "点击力度", "grams", 82, 10, 500),
     Register(0x0090, "click_release", "释放阈值", "grams", 54, 10, 500),

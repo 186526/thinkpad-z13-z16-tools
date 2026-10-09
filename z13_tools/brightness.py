@@ -16,7 +16,7 @@ resume-watch 集成约定(并行 agent 按此调用,签名勿改):
     写回即可——内核 brightness 一直是用户上次设的值,显示器重新启用时却
     可能以默认亮度亮起,写回同值即强制面板刷新为内核上报值。
 
-单元测试:python3 -m brightness(文件底部 assert 块)。
+单元测试:python3 -m z13_tools.brightness(文件底部 assert 块)。
 """
 
 import glob

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""gui.py 的非 GTK 支撑逻辑：常量、配置读写、systemd 自启动、配套工具。
+"""app.py 的非 GTK 支撑逻辑：常量、配置读写、systemd 自启动、配套工具。
 
 纯 Python 3 标准库（+ haptic），无 PyGObject 依赖，便于单元测试；
-gui.py 通过 ``from gui_utils import *`` 重导出全部名字，保持
-tests/test_gui_e2e.py 对 gui 模块级名字的 monkeypatch 兼容。
+app.py 通过 ``from z13_tools.gui.utils import *`` 重导出全部名字，保持
+tests/test_gui_e2e.py 对 app 模块级名字的 monkeypatch 兼容。
 
-注意：load_config / save_config 接受显式 ``path`` 参数。gui.py 的包装层
-会把 ``gui.CONFIG_FILE``（测试里被 monkeypatch 到临时路径）传进来，
+注意：load_config / save_config 接受显式 ``path`` 参数。app.py 的包装层
+会把 ``app.CONFIG_FILE``（测试里被 monkeypatch 到临时路径）传进来，
 避免函数体读到自己模块的模块级路径。
 """
 
@@ -19,13 +19,13 @@ import sys
 
 from z13_tools import haptic
 
-# 通过 from gui_utils import * 重导出到 gui.py 的公共名字。
-# load_config / save_config 会被 gui.py 的包装层覆盖（传入显式 path）。
+# 通过 from z13_tools.gui.utils import * 重导出到 app.py 的公共名字。
+# load_config / save_config 会被 app.py 的包装层覆盖（传入显式 path）。
 __all__ = [
     "CONFIG_DIR", "CONFIG_FILE",
     "DEFAULT_INTENSITY", "INTENSITY_STEP",
     "ZONE_MAP", "PROFILE_LABELS",
-    "ZONE_PRESETS", "ZONE_PRESET_LABELS",
+    "ZONE_PRESETS",
     "EXT_UUID", "EXT_DIR", "EXT_INSTALL_SCRIPT",
     "CAMERA_SCRIPT", "PROBE_SCRIPT", "GPU_RESET_LOG",
     "FEATURE_ROWS",
@@ -102,7 +102,6 @@ ZONE_PRESETS = {
     "standard": {"click": 76, "release": 50},
     "heavy": {"click": 110, "release": 72},
 }
-ZONE_PRESET_LABELS = {"light": "轻触", "standard": "标准", "heavy": "重按"}
 
 # ---------------- 配套工具（GNOME 扩展 / 亮度 / 相机 / GPU reset / 硬件探测） ----------------
 

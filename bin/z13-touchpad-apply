@@ -39,7 +39,7 @@ while not os.path.isdir(os.path.join(_REPO_ROOT, "z13_tools")):
     _REPO_ROOT = _parent
 sys.path.insert(0, _REPO_ROOT)
 from z13_tools.haptic import (  # noqa: E402
-    PROFILES, RegisterError, TouchpadError,
+    PROFILES, REGISTERS, RegisterError, TouchpadError,
     REGISTERS_BY_ADDR, REGISTERS_BY_KEY, find_device, get_intensity,
     list_hidraw_devices, read_register, set_intensity, write_register,
 )
@@ -80,7 +80,6 @@ def save_config(**values):
 
 
 def show_registers(dev):
-    from z13_tools.haptic import REGISTERS
     for reg in REGISTERS:
         try:
             raw = read_register(dev, reg.addr)
