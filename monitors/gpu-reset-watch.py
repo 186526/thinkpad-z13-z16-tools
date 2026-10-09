@@ -17,8 +17,8 @@
     - 追加时间戳行到 ~/.config/z13-g2-tools/gpu-resets.log(目录自动创建,
       运行时状态,不写进仓库)。
 
-systemd 用户服务安装说明(仅文档,脚本不自动安装;仿 gui.py 的
-set_autostart 风格,服务文件写入 ~/.config/systemd/user/):
+systemd 用户服务安装说明(仅文档,脚本不自动安装;仿 set_autostart() 风格,
+服务文件写入 ~/.config/systemd/user/):
 
     mkdir -p ~/.config/systemd/user
     cat > ~/.config/systemd/user/z13-gpu-reset-watch.service <<'EOF'
