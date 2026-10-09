@@ -32,10 +32,11 @@ while not os.path.isdir(os.path.join(REPO_ROOT, "z13_tools")):
     REPO_ROOT = _parent
 FINDINGS_FILE = os.path.join(REPO_ROOT, "docs", "hardware-findings.md")
 
+sys.path.insert(0, REPO_ROOT)
+from z13_tools import camera  # noqa: E402
+
 # Synaptics 指纹 06cb:0123
 FP_VENDOR, FP_PRODUCT = "06cb", "0123"
-# IR 相机(Chicony);RGB 为 04f2:b78b,IR 为 04f2:b78c
-IR_IDS = {("04f2", "b78c")}
 
 
 def lsusb_devices():
@@ -120,21 +121,6 @@ def probe_tpm():
     return ("未测试", f"{note},但 /dev/tpm0 不存在")
 
 
-def _v4l_cameras():
-    """video4linux 设备:[{path, name, ir}]。"""
-    out = []
-    for path in sorted(glob.glob("/sys/class/video4linux/video*")):
-        try:
-            with open(os.path.join(path, "name"), encoding="utf-8",
-                      errors="replace") as f:
-                name = f.read().strip()
-        except OSError:
-            name = "(读取 name 失败)"
-        ir = bool(re.search(r"\bir\b", name.lower()))
-        out.append({"/dev/" + os.path.basename(path): name, "ir": ir})
-    return out
-
-
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -148,17 +134,17 @@ def main():
         ("指纹 06cb:0123", *probe_fingerprint()),
         ("TPM", *probe_tpm()),
     ]
-    cams = _v4l_cameras()
+    cams = camera.scan()
     ir = [c for c in cams if c["ir"]]
     rgb = [c for c in cams if not c["ir"]]
     rows.append(("IR 相机",
                  "工作" if ir else "缺失",
-                 ("节点 " + "、".join(list(c)[0] for c in ir) + "(" +
-                  next(iter(ir[0].values())) + ")") if ir else "无 IR 相机"))
+                 ("节点 " + "、".join(c["path"] for c in ir) + "(" +
+                  ir[0]["name"] + ")") if ir else "无 IR 相机"))
     rows.append(("RGB 相机",
                  "工作" if rgb else "缺失",
-                 ("节点 " + "、".join(list(c)[0] for c in rgb) + "(" +
-                  next(iter(rgb[0].values())) + ")") if rgb else "无 RGB 相机"))
+                 ("节点 " + "、".join(c["path"] for c in rgb) + "(" +
+                  rgb[0]["name"] + ")") if rgb else "无 RGB 相机"))
 
     # ── 打印表格 ──────────────────────────────────────────────
     w_dev = max(len(r[0]) for r in rows) + 1
