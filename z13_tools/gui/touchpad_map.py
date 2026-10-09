@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """可视化触控板组件（自绘 GTK DrawingArea）。
 
-从 gui.py 拆出的独立模块，只依赖 GTK4 / libadwaita / pycairo，
+从 z13_tools/gui/app.py 拆出的独立模块，只依赖 GTK4 / libadwaita / pycairo，
 不持有设备状态：数值与选中态由外部通过 set_values / set_selected /
 set_main_force 驱动；点击区域内按键时回调 on_select(index)。
 """

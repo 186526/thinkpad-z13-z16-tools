@@ -76,7 +76,9 @@ def _schedule_brightness_restore():
     GLib.timeout_add(1500, _restore_brightness)
 
 
-def _on_prepare_for_sleep(_conn, _sender, _path, _iface, _signal, params, _data):
+def _on_prepare_for_sleep(_conn, _sender, _path, _iface, _signal, params):
+    # PyGObject passes the user_data argument only when signal_subscribe() was
+    # given one; this subscription is not, so the callback takes six arguments.
     # PrepareForSleep(True) -> going to sleep; PrepareForSleep(False) -> resumed.
     if params is not None and params.get_type_string() == "(b)":
         sleeping = params.get_child_value(0).get_boolean()

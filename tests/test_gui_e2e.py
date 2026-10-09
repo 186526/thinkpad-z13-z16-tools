@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gui.py 驱动级 e2e 测试：每个控件（Option）的联动验证。
+"""GUI 驱动级 e2e 测试：每个控件（Option）的联动验证。
 
 用内存假设备替换 haptic 的 IO 函数，避免触碰真实 /dev/hidraw。
 在真实 X 显示下构建 MainWindow，直接驱动各 handler，断言
